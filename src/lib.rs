@@ -467,8 +467,6 @@ mod tests {
             _e: PhantomData
         };
 
-        sqs_service.run(unimplemented!(), unimplemented!());
-
         Ok(())
     }
 }
