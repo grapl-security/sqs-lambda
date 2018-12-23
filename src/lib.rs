@@ -180,7 +180,7 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
             body.extend_from_slice(&chunk.unwrap());
         }
 
-        Ok(decompressed)
+        Ok(body)
     }
 
 }
