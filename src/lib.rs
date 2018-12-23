@@ -180,12 +180,6 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
             body.extend_from_slice(&chunk.unwrap());
         }
 
-        let mut decompressed = Vec::with_capacity(body.len() * 2);
-
-        let mut body = Cursor::new(&body);
-
-        zstd::stream::copy_decode(&mut body, &mut decompressed)?;
-
         Ok(decompressed)
     }
 
