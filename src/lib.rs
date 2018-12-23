@@ -133,6 +133,7 @@ impl<S, D, P, E> EventRetriever<E> for S3EventRetriever<S, D, P, E>
           D: EventDecoder<E> + Clone,
 {
     fn retrieve_event(&mut self, sqs_message: String) -> Result<E, Error> {
+        debug!("Parsing SqsMessage: {}", sqs_message);
         let s3_event = (self.sqs_parser)(sqs_message)?;
         let bucket = &s3_event.records[0].s3.bucket.name.as_ref().unwrap();
         let path = &s3_event.records[0].s3.object.key.as_ref().unwrap();
@@ -183,8 +184,7 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
 
         let mut body = Cursor::new(&body);
 
-        zstd::stream::copy_decode(&mut body, &mut decompressed)
-            .expect("decompress zstd proto");
+        zstd::stream::copy_decode(&mut body, &mut decompressed)?;
 
         Ok(decompressed)
     }
@@ -393,10 +393,11 @@ impl<E> EventDecoder<E> for ZstdJsonDecoder
     fn decode(&mut self, body: Vec<u8>) -> Result<E, Error>
     {
         self.buffer.clear();
+        debug!("Decompressing {} encoded bytes", body.len());
         let mut body = Cursor::new(&body);
 
         zstd::stream::copy_decode(&mut body, &mut self.buffer)?;
-
+        debug!("Deserializing event from {} decompressed bytes", self.buffer.len());
         Ok(serde_json::from_slice(&self.buffer[..])?)
     }
 }
