@@ -301,6 +301,7 @@ impl<S, R, E, H, C> SqsService<S, R, E, H, C>
         let mut any_err = Ok(());
 
         for event in event.records.into_iter() {
+            let receipt_handle = event.receipt_handle.expect("receipt_handle");
             let mut retriever = self.retriever.clone();
             let handler = self.handler.clone();
             let sqs_completion_handler = self.sqs_completion_handler.clone();
@@ -310,7 +311,7 @@ impl<S, R, E, H, C> SqsService<S, R, E, H, C>
                 let event = retriever.retrieve_event(unparsed_event)?;
 
                 handler.handle_event(event)?;
-                sqs_completion_handler.complete_message("receipt".into())?;
+                sqs_completion_handler.complete_message(receipt_handle )?;
 
                 Ok(())
             });
