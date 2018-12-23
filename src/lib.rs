@@ -396,6 +396,25 @@ impl<E> EventDecoder<E> for ZstdJsonDecoder
     }
 }
 
+#[derive(Clone)]
+pub struct ZstdDecoder {
+    pub buffer: Vec<u8>
+}
+
+impl EventDecoder<Vec<u8>> for ZstdDecoder {
+
+    fn decode(&mut self, body: Vec<u8>) -> Result<Vec<u8>, Error>
+    {
+        self.buffer.clear();
+        debug!("Decompressing {} encoded bytes", body.len());
+        let mut body = Cursor::new(&body);
+
+        zstd::stream::copy_decode(&mut body, &mut self.buffer)?;
+        debug!("Deserializing event from {} decompressed bytes", self.buffer.len());
+        Ok(self.buffer.clone())
+    }
+}
+
 pub fn events_from_s3_sns_sqs(event: String) -> Result<S3Event, Error> {
     let sns_event: SnsEntity = serde_json::from_str(&event)?;
     let event = serde_json::from_str(sns_event.message.as_ref().unwrap())?;
