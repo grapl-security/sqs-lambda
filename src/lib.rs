@@ -34,6 +34,7 @@ use rusoto_s3::{GetObjectRequest, S3};
 use rusoto_s3::S3Client;
 use rusoto_sqs::{GetQueueUrlRequest, Sqs, SqsClient};
 use serde::Deserialize;
+use std::time::Duration;
 
 #[derive(Debug, Fail)]
 enum SqsServiceError {
@@ -171,7 +172,10 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
             bucket: bucket.to_owned(),
             key: path.to_owned(),
             ..GetObjectRequest::default()
-        }).wait().expect(&format!("get_object {} {}", bucket, path));
+        })
+            .with_timeout(Duration::from_secs(10))
+            .wait()
+            .expect(&format!("get_object {} {}", bucket, path));
 
 
         let mut body = Vec::with_capacity(5000);
@@ -241,7 +245,8 @@ impl<S> SqsCompletionHandler<S> for BlockingSqsCompletionHandler<S>
                 queue_url: self.queue_url.clone(),
                 receipt_handle,
             }
-        ).wait()?;
+        ).with_timeout(Duration::from_secs(2))
+            .wait()?;
         Ok(())
     }
 
