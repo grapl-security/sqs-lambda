@@ -195,8 +195,7 @@ pub trait EventHandler<E>
 }
 
 
-pub trait SqsCompletionHandler<S>
-    where S: Sqs + Send + 'static,
+pub trait SqsCompletionHandler
 
 {
     fn complete_message(&self, receipt_handle: String) -> Result<(), Error>;
@@ -236,10 +235,12 @@ impl<S> Clone for BlockingSqsCompletionHandler<S>
     }
 }
 
-impl<S> SqsCompletionHandler<S> for BlockingSqsCompletionHandler<S>
+
+impl<S> SqsCompletionHandler for BlockingSqsCompletionHandler<S>
     where S: Sqs + Send + 'static,
 {
     fn complete_message(&self, receipt_handle: String) -> Result<(), Error> {
+        info!("Deleting message. Receipt handle: {} Queue Url: {}", receipt_handle, self.queue_url);
         self.sqs_client.delete_message(
             &rusoto_sqs::DeleteMessageRequest {
                 queue_url: self.queue_url.clone(),
@@ -261,7 +262,7 @@ pub struct SqsService<S, R, E, H, C>
     where S: Sqs + Send + 'static,
           R: EventRetriever<E> + Clone,
           H: EventHandler<E>,
-          C: SqsCompletionHandler<S> + Clone,
+          C: SqsCompletionHandler + Clone,
           E: Send + 'static
 {
     pub retriever: R,
@@ -275,7 +276,7 @@ impl<S, R, E, H, C> SqsService<S, R, E, H, C>
     where S: Sqs + Send + 'static,
           R: EventRetriever<E> + Clone + Send + 'static,
           H: EventHandler<E> + Clone + Send + 'static,
-          C: SqsCompletionHandler<S> + Clone + Send + 'static,
+          C: SqsCompletionHandler + Clone + Send + 'static,
           E: Send + 'static
 {
     pub fn new(
@@ -297,7 +298,7 @@ impl<S, R, E, H, C> SqsService<S, R, E, H, C>
     where S: Sqs + Send + 'static,
           R: EventRetriever<E> + Clone + Send + 'static,
           H: EventHandler<E> + Clone + Send + 'static,
-          C: SqsCompletionHandler<S> + Clone + Send + 'static,
+          C: SqsCompletionHandler + Clone + Send + 'static,
           E: Send + 'static
 {
     pub fn run(&mut self, event: SqsEvent, context: Context) -> Result<(), HandlerError> {
