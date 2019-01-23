@@ -203,8 +203,16 @@ pub trait SqsCompletionHandler
 }
 
 #[derive(Clone, Debug)]
-struct NopSqsCompletionHandler {
+pub struct NopSqsCompletionHandler {
     queue_url: String
+}
+
+impl NopSqsCompletionHandler {
+    pub fn new(queue_url: impl Into<String>) -> Self {
+        Self {
+            queue_url: queue_url.into()
+        }
+    }
 }
 
 impl SqsCompletionHandler for NopSqsCompletionHandler {
