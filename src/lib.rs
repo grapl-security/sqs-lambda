@@ -202,6 +202,23 @@ pub trait SqsCompletionHandler
     fn wait(&self) -> Result<(), Error>;
 }
 
+#[derive(Clone, Debug)]
+struct NopSqsCompletionHandler {
+    queue_url: String
+}
+
+impl SqsCompletionHandler for NopSqsCompletionHandler {
+    fn complete_message(&self, receipt_handle: String) -> Result<(), Error> {
+        info!("Nop deletion message. Receipt handle: {} Queue Url: {}", receipt_handle, self.queue_url);
+        Ok(())
+    }
+
+    fn wait(&self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+
 pub struct BlockingSqsCompletionHandler<S>
     where S: Sqs + Send + 'static,
 {
