@@ -283,9 +283,8 @@ impl<S> SqsCompletionHandler for BlockingSqsCompletionHandler<S>
 
 
 #[derive(Clone)]
-pub struct SqsService<S, R, E, H, C>
-    where S: Sqs + Send + 'static,
-          R: EventRetriever<E> + Clone,
+pub struct SqsService<R, E, H, C>
+    where R: EventRetriever<E> + Clone,
           H: EventHandler<E>,
           C: SqsCompletionHandler + Clone,
           E: Send + 'static
@@ -293,13 +292,12 @@ pub struct SqsService<S, R, E, H, C>
     pub retriever: R,
     pub handler: H,
     pub sqs_completion_handler: C,
-    pub _e: PhantomData<(E, S)>
+    pub _e: PhantomData<(E)>
 }
 
 
-impl<S, R, E, H, C> SqsService<S, R, E, H, C>
-    where S: Sqs + Send + 'static,
-          R: EventRetriever<E> + Clone + Send + 'static,
+impl<R, E, H, C> SqsService<R, E, H, C>
+    where R: EventRetriever<E> + Clone + Send + 'static,
           H: EventHandler<E> + Clone + Send + 'static,
           C: SqsCompletionHandler + Clone + Send + 'static,
           E: Send + 'static
@@ -319,9 +317,8 @@ impl<S, R, E, H, C> SqsService<S, R, E, H, C>
 
 }
 
-impl<S, R, E, H, C> SqsService<S, R, E, H, C>
-    where S: Sqs + Send + 'static,
-          R: EventRetriever<E> + Clone + Send + 'static,
+impl<R, E, H, C> SqsService<R, E, H, C>
+    where R: EventRetriever<E> + Clone + Send + 'static,
           H: EventHandler<E> + Clone + Send + 'static,
           C: SqsCompletionHandler + Clone + Send + 'static,
           E: Send + 'static
