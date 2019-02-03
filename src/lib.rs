@@ -404,6 +404,15 @@ impl<E> EventDecoder<E> for ZstdProtoDecoder
 
 }
 
+impl<T, E> EventDecoder<E> for Fn(T) -> Result<E, Error>
+    where E: for<'a> Deserialize<'a>
+{
+    fn decode(&mut self, body: Vec<u8>) -> Result<E, Error> {
+        self.decode(body)
+    }
+}
+
+
 #[derive(Clone)]
 pub struct ZstdJsonDecoder {
     pub buffer: Vec<u8>
