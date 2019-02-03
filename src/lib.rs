@@ -404,8 +404,9 @@ impl<E> EventDecoder<E> for ZstdProtoDecoder
 
 }
 
-impl<E> EventDecoder<E> for Fn(Vec<u8>) -> Result<E, Error>
-    where E: for<'a> Deserialize<'a>
+impl<E, F> EventDecoder<E> for F
+    where E: for<'a> Deserialize<'a>,
+          F: Fn(Vec<u8>) -> Result<E, Error>
 {
     fn decode(&mut self, body: Vec<u8>) -> Result<E, Error> {
         (self)(body)
@@ -481,7 +482,19 @@ mod tests {
         }
     }
 
+
+
     #[test]
+    fn closure_works() -> Result<(), Error> {
+
+        let retriever: SnsEventRetriever<_, (), _> = SnsEventRetriever::new(
+            events_from_sns_sqs,
+            |v| unimplemented!(),
+        );
+        Ok(())
+    }
+
+        #[test]
     fn it_works() -> Result<(), Error> {
         let region = Region::Custom {
             name: "local".into(),
