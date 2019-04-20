@@ -168,7 +168,7 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
     {
         info!("Fetching data from {} {}", bucket, path);
 
-        let object = self.s3_client.get_object(&GetObjectRequest {
+        let object = self.s3_client.get_object(GetObjectRequest {
             bucket: bucket.to_owned(),
             key: path.to_owned(),
             ..GetObjectRequest::default()
@@ -267,7 +267,7 @@ impl<S> SqsCompletionHandler for BlockingSqsCompletionHandler<S>
     fn complete_message(&self, receipt_handle: String) -> Result<(), Error> {
         info!("Deleting message. Receipt handle: {} Queue Url: {}", receipt_handle, self.queue_url);
         self.sqs_client.delete_message(
-            &rusoto_sqs::DeleteMessageRequest {
+            rusoto_sqs::DeleteMessageRequest {
                 queue_url: self.queue_url.clone(),
                 receipt_handle,
             }
