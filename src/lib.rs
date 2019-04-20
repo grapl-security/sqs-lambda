@@ -48,15 +48,16 @@ enum SqsServiceError {
 macro_rules! wait_on {
     ($x:expr) => {
         {
-            let rt = tokio::runtime::current_thread::Runtime::new()?;
+//            let rt = tokio::runtime::current_thread::Runtime::new()?;
 
             tokio::runtime::current_thread::block_on_all(
                 futures::lazy(|| {
-                    $x
+                    $x.with_timeout(Duration::from_secs(2))
             }))
         }
     };
 }
+
 
 macro_rules! log_time {
     ($msg: expr, $x:expr) => {
