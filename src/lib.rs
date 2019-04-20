@@ -1,3 +1,4 @@
+extern crate tokio;
 extern crate aws_lambda_events;
 #[macro_use]
 extern crate failure;
@@ -42,6 +43,19 @@ enum SqsServiceError {
     MessageHandlerPanic {
         panic_msg: String,
     },
+}
+
+macro_rules! wait_on {
+    ($x:expr) => {
+        {
+            let rt = tokio::runtime::current_thread::Runtime::new()?;
+
+            tokio::runtime::current_thread::block_on_all(
+                futures::lazy(|| {
+                    $x
+            }))
+        }
+    };
 }
 
 macro_rules! log_time {
@@ -168,14 +182,11 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
     {
         info!("Fetching data from {} {}", bucket, path);
 
-        let object = self.s3_client.get_object(GetObjectRequest {
+        let object = wait_on!(self.s3_client.get_object(GetObjectRequest {
             bucket: bucket.to_owned(),
             key: path.to_owned(),
             ..GetObjectRequest::default()
-        })
-            .with_timeout(Duration::from_secs(10))
-            .wait()
-            .expect(&format!("get_object {} {}", bucket, path));
+        })).expect(&format!("get_object {} {}", bucket, path));
 
 
         let mut body = Vec::with_capacity(5000);
@@ -266,13 +277,12 @@ impl<S> SqsCompletionHandler for BlockingSqsCompletionHandler<S>
 {
     fn complete_message(&self, receipt_handle: String) -> Result<(), Error> {
         info!("Deleting message. Receipt handle: {} Queue Url: {}", receipt_handle, self.queue_url);
-        self.sqs_client.delete_message(
+        wait_on!(self.sqs_client.delete_message(
             rusoto_sqs::DeleteMessageRequest {
                 queue_url: self.queue_url.clone(),
                 receipt_handle,
             }
-        ).with_timeout(Duration::from_secs(2))
-            .wait()?;
+        ))?;
         Ok(())
     }
 
