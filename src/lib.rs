@@ -37,25 +37,13 @@ use rusoto_sqs::{GetQueueUrlRequest, Sqs, SqsClient};
 use serde::Deserialize;
 use std::time::Duration;
 
+
 #[derive(Debug, Fail)]
 enum SqsServiceError {
     #[fail(display = "SqsMessage handler panicked with: {}", panic_msg)]
     MessageHandlerPanic {
         panic_msg: String,
     },
-}
-
-macro_rules! wait_on {
-    ($x:expr) => {
-        {
-//            let rt = tokio::runtime::current_thread::Runtime::new()?;
-
-            tokio::runtime::current_thread::block_on_all(
-                futures::lazy(|| {
-                    $x.with_timeout(Duration::from_secs(2))
-            }))
-        }
-    };
 }
 
 
@@ -183,13 +171,14 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
     {
         info!("Fetching data from {} {}", bucket, path);
 
-        let object = wait_on!(self.s3_client.get_object(GetObjectRequest {
+        let object = self.s3_client.get_object(GetObjectRequest {
             bucket: bucket.to_owned(),
             key: path.to_owned(),
             ..GetObjectRequest::default()
-        })).expect(&format!("get_object {} {}", bucket, path));
+        }).sync();
 
 
+        let object = object.expect(&format!("get_object {} {}", bucket, path));
         let mut body = Vec::with_capacity(5000);
 
         for chunk in object.body.unwrap().wait() {
@@ -197,6 +186,7 @@ impl<S, D, P, E> S3EventRetriever<S, D, P, E>
         }
 
         Ok(body)
+
     }
 
 }
@@ -278,12 +268,12 @@ impl<S> SqsCompletionHandler for BlockingSqsCompletionHandler<S>
 {
     fn complete_message(&self, receipt_handle: String) -> Result<(), Error> {
         info!("Deleting message. Receipt handle: {} Queue Url: {}", receipt_handle, self.queue_url);
-        wait_on!(self.sqs_client.delete_message(
+        self.sqs_client.delete_message(
             rusoto_sqs::DeleteMessageRequest {
                 queue_url: self.queue_url.clone(),
                 receipt_handle,
             }
-        ))?;
+        ).wait()?;
         Ok(())
     }
 
