@@ -26,7 +26,7 @@ use sqs_lambda::event_emitter::EventEmitter;
 use sqs_lambda::completion_event_serializer::CompletionEventSerializer;
 use sqs_lambda::event_decoder::EventDecoder;
 use sqs_lambda::event_retriever::S3EventRetriever;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
 struct MyService {}
@@ -147,7 +147,7 @@ impl EventDecoder<Vec<u8>> for ZstdDecoder
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ZstdJsonDecoder {
     pub buffer: Vec<u8>
 }
@@ -185,7 +185,14 @@ fn main() {
     let sqs_client: SqsClient = init_sqs_client();
     let s3_client: S3Client = init_s3_client();
 
-    let sqs_consumer = SqsConsumerActor::new(SqsConsumer::new(sqs_client.clone()));
+    let consume_policy = ConsumePolicy::new(
+        0, // Use the Context.deadline from the lambda_runtime
+        Duration::from_secs(5), // Stop consuming when there's 10 seconds left in the runtime
+    );
+
+    let sqs_consumer = SqsConsumerActor::new(
+        SqsConsumer::new(sqs_client.clone(), "queue_url".into(), consume_policy)
+    );
 
     let sqs_completion_handler = SqsCompletionHandlerActor::new(
         SqsCompletionHandler::new(
@@ -196,31 +203,38 @@ fn main() {
                 s3: init_s3_client(),
                 output_bucket: "SomeBucket".to_owned(),
                 key_fn: |_event| {
-                    return "static_key".to_owned()
+                    let cur_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                        Ok(n) => n.as_millis(),
+                        Err(_) => panic!("SystemTime before UNIX EPOCH!"),
+                    };
+
+                    let cur_day = cur_ms - (cur_ms % 86400);
+
+                    format!(
+                        "{}/{}-{}",
+                        cur_day, cur_ms, uuid::Uuid::new_v4()
+                    )
                 }
             },
             CompletionPolicy::new(
-                1000,
-                Duration::from_secs(30)
+                1000, // Buffer up to 1000 messages
+                Duration::from_secs(30), // Buffer for up to 30 seconds
             )
         )
     );
 
-    let event_processors: Vec<_> = (0..10)
+    let event_processors: Vec<_> = (0..40)
         .into_iter()
         .map(|_| {
             EventProcessorActor::new(EventProcessor::new(
                 sqs_consumer.clone(),
                 sqs_completion_handler.clone(),
                 MyService {},
-                S3EventRetriever::new(s3_client.clone(), ZstdJsonDecoder { buffer: vec![] }),
+                S3EventRetriever::new(s3_client.clone(), ZstdJsonDecoder::default()),
             ))
         })
         .collect();
 
     event_processors.iter().for_each(|ep| ep.start_processing());
-
-    // Wait for lambda timeout to reach T minus 10 seconds
-    event_processors.iter().for_each(|ep| ep.stop_processing());
 }
 

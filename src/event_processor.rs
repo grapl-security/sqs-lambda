@@ -64,9 +64,23 @@ where
 {
     pub fn process_event(&mut self, event: SqsMessage) {
         // TODO: Handle errors
-        let retrieved_event = self.event_retriever.retrieve_event(&event).unwrap();
+        let retrieved_event = match self.event_retriever.retrieve_event(&event) {
+            Ok(retrieved_event) => retrieved_event,
+            Err(e) => {
+                return
+                // TODO: Retry
+                // TODO: We could reset the message visibility to 0 so it gets picked up again?
+            }
+        };
 
-        let completed = self.event_handler.handle_event(retrieved_event).unwrap();
+        let completed = match self.event_handler.handle_event(retrieved_event) {
+            Ok(completed) => completed,
+            Err(e) => {
+                return
+                // TODO: Retry
+                // TODO: We could reset the message visibility to 0 so it gets picked up again?
+            }
+        };
 
         self.completion_handler.mark_complete(event, completed);
 
