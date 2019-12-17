@@ -1,19 +1,13 @@
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::error::Error;
-
-use futures::sink::Sink;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use futures::compat::Future01CompatExt;
 
 use rusoto_sqs::{ReceiveMessageRequest, Sqs};
-
 use rusoto_sqs::Message as SqsMessage;
+use tokio::sync::mpsc::{channel, Sender};
+use async_trait::async_trait;
 
 use crate::event_processor::EventProcessorActor;
-use std::time::Instant;
-
-use futures::{Future, FutureExt};
-use futures::task::{Poll, Context};
-use std::pin::Pin;
 
 pub struct ConsumePolicy {
     deadline: i64,
@@ -38,7 +32,7 @@ impl ConsumePolicy {
 }
 
 pub struct SqsConsumer<S>
-    where S: Sqs + Clone + Send + 'static
+    where S: Sqs  + Send + Sync + 'static
 {
     sqs_client: S,
     queue_url: String,
@@ -48,7 +42,7 @@ pub struct SqsConsumer<S>
 }
 
 impl<S> SqsConsumer<S>
-    where S: Sqs + Clone + Send + 'static
+    where S: Sqs  + Send + Sync + 'static
 {
     pub fn new(
         sqs_client: S,
@@ -70,13 +64,13 @@ impl<S> SqsConsumer<S>
 }
 
 impl<S> SqsConsumer<S>
-    where S: Sqs + Clone + Send + 'static
+    where S: Sqs  + Send + Sync + 'static
 {
     pub async fn get_new_event(&mut self, event_processor: EventProcessorActor) {
         let should_consume = self.consume_policy.should_consume();
 
         if self.stored_events.len() == 0 && should_consume {
-            let new_events = self.batch_get_events().unwrap();
+            let new_events = self.batch_get_events().await.unwrap();
             self.stored_events.extend(new_events);
         }
 
@@ -89,11 +83,11 @@ impl<S> SqsConsumer<S>
         }
 
         if let Some(next_event) = self.stored_events.pop() {
-            event_processor.process_event(next_event);
+            event_processor.process_event(next_event).await;
         }
     }
 
-    pub fn batch_get_events(&self) -> Result<Vec<SqsMessage>, Box<dyn Error>> {
+    pub async fn batch_get_events(&self) -> Result<Vec<SqsMessage>, Box<dyn Error>> {
         let recv = self.sqs_client.receive_message(
             ReceiveMessageRequest {
                 max_number_of_messages: Some(20),
@@ -101,7 +95,9 @@ impl<S> SqsConsumer<S>
                 wait_time_seconds: Some(1),
                 ..Default::default()
             }
-        ).sync()?;
+        ).compat().await?;
+
+
 
         Ok(recv.messages.unwrap_or(vec![]))
     }
@@ -115,9 +111,9 @@ pub enum SqsConsumerMessage {
 }
 
 impl<S> SqsConsumer<S>
-    where S: Sqs + Clone + Send + 'static
+    where S: Sqs  + Send + Sync + 'static
 {
-    pub async fn route_message(&mut self, msg: SqsConsumerMessage) {
+    async fn route_message(&mut self, msg: SqsConsumerMessage) {
         match msg {
             SqsConsumerMessage::get_new_event { event_processor } => {
                 self.get_new_event(event_processor).await
@@ -133,76 +129,56 @@ pub struct SqsConsumerActor {
 
 impl SqsConsumerActor {
     pub fn new<S>(actor_impl: SqsConsumer<S>) -> Self
-        where S: Sqs + Clone + Send + 'static
+        where S: Sqs  + Send + Sync + 'static
     {
         let (sender, receiver) = channel(0);
 
-        tokio::task::spawn(SqsConsumerRouter {
-            receiver,
-            actor_impl,
-        });
+        tokio::task::spawn(
+            route_wrapper(
+                SqsConsumerRouter {
+                    receiver,
+                    actor_impl,
+                }
+            )
+        );
         Self { sender }
     }
 
-    pub async fn get_new_event(&self, event_processor: EventProcessorActor) {
+    pub async fn get_next_event(&self, event_processor: EventProcessorActor) {
         let msg = SqsConsumerMessage::get_new_event { event_processor };
-        self.sender.clone().send(msg).await.map(|_| ()).map_err(|_| ());
+        if let Err(_e) = self.sender.clone().send(msg).await {
+            panic!("Receiver has failed, propagating error. get_new_event")
+        }
     }
 }
 
-use futures::stream::Stream;
-use pin_utils::unsafe_pinned;
+#[async_trait]
+pub trait Consumer {
+    async fn get_next_event(&self, event_processor: EventProcessorActor);
+}
 
-
-
-use std::marker::Unpin;
+#[async_trait]
+impl Consumer for SqsConsumerActor {
+    async fn get_next_event(&self, event_processor: EventProcessorActor) {
+        SqsConsumerActor::get_next_event(
+            self, event_processor
+        ).await
+    }
+}
 
 pub struct SqsConsumerRouter<S>
-    where S: Sqs + Clone + Send + 'static
+    where S: Sqs  + Send + Sync + 'static
 {
     receiver: tokio::sync::mpsc::Receiver<SqsConsumerMessage>,
     actor_impl: SqsConsumer<S>,
 }
 
-use pin_utils::pin_mut;
 
-impl<S> Future for SqsConsumerRouter<S>
-    where S: Sqs + Clone + Send + 'static
+
+async fn route_wrapper<S>(mut router: SqsConsumerRouter<S>)
+    where S: Sqs  + Send + Sync + 'static
 {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let received = {
-            let mut receiver = unsafe {
-                self.as_mut().map_unchecked_mut(|me| {
-                    &mut me.receiver
-                })
-            };
-
-            let received = receiver.poll_recv(cx);
-            received
-        };
-
-
-        match received {
-            Poll::Ready(Some(msg)) => {
-                cx.waker().wake_by_ref();
-
-                // route_message is async
-                self.actor_impl.route_message(msg);
-
-                Poll::Pending
-            }
-            Poll::Ready(None) => {
-                unsafe {
-                    self.as_mut().map_unchecked_mut(|me| {
-                        me.receiver.close();
-                        &mut me.receiver
-                    })
-                };
-                Poll::Ready(())
-            }
-            _ => Poll::Pending,
-        }
+    while let Some(msg) = router.receiver.recv().await {
+        router.actor_impl.route_message(msg).await;
     }
 }

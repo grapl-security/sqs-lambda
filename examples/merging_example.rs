@@ -1,80 +1,48 @@
-extern crate sqs_lambda;
 extern crate futures;
 extern crate rusoto_s3;
 extern crate rusoto_sqs;
+extern crate sqs_lambda;
 extern crate tokio;
 
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Cursor;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use prost::Message;
-use rusoto_s3::{PutObjectRequest, S3};
 use rusoto_s3::S3Client;
-use rusoto_sqs::{Sqs, SqsClient};
+use rusoto_sqs::SqsClient;
 use serde::Deserialize;
 
+use async_trait::async_trait;
 use event_processor::*;
 use sqs_completion_handler::*;
 use sqs_consumer::*;
-
-use sqs_lambda::event_processor;
-use sqs_lambda::sqs_completion_handler;
-use sqs_lambda::sqs_consumer;
-use sqs_lambda::event_handler::EventHandler;
-use sqs_lambda::event_emitter::EventEmitter;
 use sqs_lambda::completion_event_serializer::CompletionEventSerializer;
 use sqs_lambda::event_decoder::EventDecoder;
+use sqs_lambda::event_emitter::{S3EventEmitter};
+use sqs_lambda::event_handler::EventHandler;
+use sqs_lambda::event_processor;
 use sqs_lambda::event_retriever::S3EventRetriever;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use futures::Future;
-use tokio::prelude::*;
+use sqs_lambda::sqs_completion_handler;
+use sqs_lambda::sqs_consumer;
 
 #[derive(Debug, Clone)]
 struct MyService {}
 
+#[async_trait]
 impl EventHandler for MyService {
     type InputEvent = HashMap<String, String>;
     type OutputEvent = Subgraph;
     type Error = ();
 
-    fn handle_event(&mut self, _input: Self::InputEvent) -> Result<Self::OutputEvent, Self::Error> {
+    async fn handle_event(&mut self, _input: Self::InputEvent) -> Result<Self::OutputEvent, Self::Error> {
         // do some work
 
         Ok(Subgraph {})
     }
 }
 
-#[derive(Clone)]
-struct S3EventEmitter<F>
-    where F: Fn(&[u8]) -> String,
-{
-    s3: S3Client,
-    output_bucket: String,
-    key_fn: F
-}
-
-impl<F> EventEmitter for S3EventEmitter<F>
-    where F: Fn(&[u8]) -> String,
-{
-    type Event = Vec<u8>;
-    type Error = Box<dyn Error>;
-
-    fn emit_event(&mut self, event: Self::Event) -> Result<(), Self::Error> {
-        let key = (self.key_fn)(&event);
-
-        self.s3.put_object(
-            PutObjectRequest {
-                body: Some(event.into()),
-                bucket: "".to_string(),
-                key,
-                ..Default::default()
-            }
-        ).sync()?;
-
-        Ok(())
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct Subgraph {}
@@ -215,11 +183,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 init_sqs_client(),
                 "queue_url".to_string(),
                 SubgraphSerializer {},
-                S3EventEmitter {
-                    s3: init_s3_client(),
-                    output_bucket: "SomeBucket".to_owned(),
-                    key_fn: time_based_key_fn,
-                },
+                S3EventEmitter::new(
+                    init_s3_client(),
+                    "SomeBucket".to_owned(),
+                    time_based_key_fn,
+                ),
                 CompletionPolicy::new(
                     1000, // Buffer up to 1000 messages
                     Duration::from_secs(30), // Buffer for up to 30 seconds
@@ -241,7 +209,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         futures::future::join_all(event_processors.iter().map(|ep| ep.start_processing())).await;
 
-        shutdown_notify.await;
+        // Wait for the consumers to shutdown
+        let _ = shutdown_notify.await;
+
+        tokio::time::delay_for(Duration::from_millis(100)).await;
 
     });
 
