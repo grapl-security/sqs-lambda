@@ -3,7 +3,8 @@ name = "sqs-lambda"
 version = "0.7.0"
 authors = ["Insanitybit <insanitybit@gmail.com>"]
 edition = "2018"
-
+description = 'SQS Service helper library'
+license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
