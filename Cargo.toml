@@ -11,8 +11,8 @@ rusoto_core = "0.42.0"
 rusoto_sqs = "0.42.0"
 
 
-tokio = "0.1.21"
-futures = "0.1.29"
+tokio = {version="0.2.4", features=["sync", "rt-core", "macros"]}
+futures = "0.3"
 rusoto_s3 = "0.42.0"
 async-trait = "0.1.21"
 aws_lambda_events = "0.2.5"
@@ -23,3 +23,4 @@ zstd = "0.5.1"
 lambda_runtime = "0.2.1"
 
 uuid = { version = "0.8.1", features = ["v4"] }
+pin-utils = "0.1.0-alpha.4"

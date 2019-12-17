@@ -1,15 +1,17 @@
 
 
 use futures::sink::Sink;
-use futures::stream::Stream;
-use futures::sync::mpsc::{channel, Receiver, Sender};
-use futures::{task, Future, Poll};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use rusoto_sqs::Message as SqsMessage;
 use rusoto_sqs::{Sqs, SqsClient, DeleteMessageBatchRequest, DeleteMessageBatchRequestEntry};
 use crate::event_emitter::EventEmitter;
 use crate::completion_event_serializer::CompletionEventSerializer;
 use std::time::{Duration, Instant};
+use std::task::{Poll, Context};
+use std::pin::Pin;
+use std::future::Future;
+
 
 pub struct CompletionPolicy {
     max_messages: u16,
@@ -171,7 +173,7 @@ where
     {
         let (sender, receiver) = channel(0);
 
-        tokio::spawn(SqsCompletionHandlerRouter {
+        tokio::task::spawn(SqsCompletionHandlerRouter {
             receiver,
             actor_impl,
         });
@@ -179,13 +181,13 @@ where
         Self { sender }
     }
 
-    pub fn mark_complete(&self, msg: SqsMessage, completed: CE) {
+    pub async fn mark_complete(&self, msg: SqsMessage, completed: CE) {
         let msg = SqsCompletionHandlerMessage::mark_complete { msg, completed };
-        tokio::spawn(self.sender.clone().send(msg).map(|_| ()).map_err(|_| ()));
+        self.sender.clone().send(msg).await.map(|_| ()).map_err(|_| ());
     }
-    pub fn ack_all(&self) {
+    pub async fn ack_all(&self) {
         let msg = SqsCompletionHandlerMessage::ack_all {};
-        tokio::spawn(self.sender.clone().send(msg).map(|_| ()).map_err(|_| ()));
+        self.sender.clone().send(msg).await.map(|_| ()).map_err(|_| ());
     }
 }
 
@@ -207,21 +209,22 @@ where
     CE: Send + Clone + 'static,
     EE: EventEmitter<Event = Payload> + Send + Clone + 'static,
 {
-    type Item = ();
-    type Error = ();
+    type Output = ();
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.receiver.poll() {
-            Ok(futures::Async::Ready(Some(msg))) => {
-                task::current().notify();
-                self.actor_impl.route_message(msg);
-                Ok(futures::Async::NotReady)
-            }
-            Ok(futures::Async::Ready(None)) => {
-                self.receiver.close();
-                Ok(futures::Async::Ready(()))
-            }
-            _ => Ok(futures::Async::NotReady),
-        }
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+//        match self.receiver.poll() {
+//            Ok(Poll::Ready(Some(msg))) => {
+//                task::current().notify();
+//                self.actor_impl.route_message(msg);
+//                Ok(Poll::NotReady)
+//            }
+//            Ok(Poll::Ready(None)) => {
+//                self.receiver.close();
+//                Ok(Poll::Ready(()))
+//            }
+//            _ => Ok(Poll::NotReady),
+//        }
+        unimplemented!()
     }
+
 }

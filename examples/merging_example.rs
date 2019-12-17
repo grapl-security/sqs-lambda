@@ -27,6 +27,8 @@ use sqs_lambda::completion_event_serializer::CompletionEventSerializer;
 use sqs_lambda::event_decoder::EventDecoder;
 use sqs_lambda::event_retriever::S3EventRetriever;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use futures::Future;
+use tokio::prelude::*;
 
 #[derive(Debug, Clone)]
 struct MyService {}
@@ -169,72 +171,80 @@ impl<E> EventDecoder<E> for ZstdJsonDecoder
 }
 
 
-fn init_sqs_client<S>() -> S
-    where S: Sqs
+fn init_sqs_client() -> SqsClient
 {
     unimplemented!()
 }
 
-fn init_s3_client<S>() -> S
-    where S: S3
+fn init_s3_client() -> S3Client
 {
     unimplemented!()
 }
 
-fn main() {
-    let sqs_client: SqsClient = init_sqs_client();
-    let s3_client: S3Client = init_s3_client();
+fn time_based_key_fn(_event: &[u8]) -> String {
+    let cur_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(n) => n.as_millis(),
+        Err(_) => panic!("SystemTime before UNIX EPOCH!"),
+    };
 
-    let consume_policy = ConsumePolicy::new(
-        0, // Use the Context.deadline from the lambda_runtime
-        Duration::from_secs(5), // Stop consuming when there's 10 seconds left in the runtime
-    );
+    let cur_day = cur_ms - (cur_ms % 86400);
 
-    let sqs_consumer = SqsConsumerActor::new(
-        SqsConsumer::new(sqs_client.clone(), "queue_url".into(), consume_policy)
-    );
+    format!(
+        "{}/{}-{}",
+        cur_day, cur_ms, uuid::Uuid::new_v4()
+    )
+}
 
-    let sqs_completion_handler = SqsCompletionHandlerActor::new(
-        SqsCompletionHandler::new(
-            sqs_client,
-            "queue_url".to_string(),
-            SubgraphSerializer {},
-            S3EventEmitter {
-                s3: init_s3_client(),
-                output_bucket: "SomeBucket".to_owned(),
-                key_fn: |_event| {
-                    let cur_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                        Ok(n) => n.as_millis(),
-                        Err(_) => panic!("SystemTime before UNIX EPOCH!"),
-                    };
 
-                    let cur_day = cur_ms - (cur_ms % 86400);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tokio::spawn(async move {
+        let consume_policy = ConsumePolicy::new(
+            0, // Use the Context.deadline from the lambda_runtime
+            Duration::from_secs(5), // Stop consuming when there's 10 seconds left in the runtime
+        );
 
-                    format!(
-                        "{}/{}-{}",
-                        cur_day, cur_ms, uuid::Uuid::new_v4()
-                    )
-                }
-            },
-            CompletionPolicy::new(
-                1000, // Buffer up to 1000 messages
-                Duration::from_secs(30), // Buffer for up to 30 seconds
+        let (tx, shutdown_notify) = tokio::sync::oneshot::channel();
+
+        let sqs_consumer = SqsConsumerActor::new(
+            SqsConsumer::new(init_sqs_client(), "queue_url".into(), consume_policy, tx)
+        );
+
+        let sqs_completion_handler = SqsCompletionHandlerActor::new(
+            SqsCompletionHandler::new(
+                init_sqs_client(),
+                "queue_url".to_string(),
+                SubgraphSerializer {},
+                S3EventEmitter {
+                    s3: init_s3_client(),
+                    output_bucket: "SomeBucket".to_owned(),
+                    key_fn: time_based_key_fn,
+                },
+                CompletionPolicy::new(
+                    1000, // Buffer up to 1000 messages
+                    Duration::from_secs(30), // Buffer for up to 30 seconds
+                )
             )
-        )
-    );
+        );
 
-    let event_processors: Vec<_> = (0..40)
-        .into_iter()
-        .map(|_| {
-            EventProcessorActor::new(EventProcessor::new(
-                sqs_consumer.clone(),
-                sqs_completion_handler.clone(),
-                MyService {},
-                S3EventRetriever::new(s3_client.clone(), ZstdJsonDecoder::default()),
-            ))
-        })
-        .collect();
+        let event_processors: Vec<_> = (0..40)
+            .into_iter()
+            .map(|_| {
+                EventProcessorActor::new(EventProcessor::new(
+                    sqs_consumer.clone(),
+                    sqs_completion_handler.clone(),
+                    MyService {},
+                    S3EventRetriever::new(init_s3_client(), ZstdJsonDecoder::default()),
+                ))
+            })
+            .collect();
 
-    event_processors.iter().for_each(|ep| ep.start_processing());
+        futures::future::join_all(event_processors.iter().map(|ep| ep.start_processing())).await;
+
+        shutdown_notify.await;
+
+    });
+
+    Ok(())
 }
 

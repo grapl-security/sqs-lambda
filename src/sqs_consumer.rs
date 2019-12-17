@@ -1,18 +1,19 @@
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::error::Error;
 
-use futures::{ Poll, task};
 use futures::sink::Sink;
-use futures::stream::Stream;
-use futures::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+
 use rusoto_sqs::{ReceiveMessageRequest, Sqs};
-use futures::Future;
 
 use rusoto_sqs::Message as SqsMessage;
-use lambda_runtime::Context;
 
 use crate::event_processor::EventProcessorActor;
 use std::time::Instant;
+
+use futures::{Future, FutureExt};
+use futures::task::{Poll, Context};
+use std::pin::Pin;
 
 pub struct ConsumePolicy {
     deadline: i64,
@@ -43,6 +44,7 @@ pub struct SqsConsumer<S>
     queue_url: String,
     stored_events: Vec<SqsMessage>,
     consume_policy: ConsumePolicy,
+    shutdown_subscriber: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl<S> SqsConsumer<S>
@@ -52,6 +54,7 @@ impl<S> SqsConsumer<S>
         sqs_client: S,
         queue_url: String,
         consume_policy: ConsumePolicy,
+        shutdown_subscriber: tokio::sync::oneshot::Sender<()>,
     ) -> SqsConsumer<S>
     where
         S: Sqs,
@@ -61,6 +64,7 @@ impl<S> SqsConsumer<S>
             queue_url,
             stored_events: Vec::with_capacity(20),
             consume_policy,
+            shutdown_subscriber: Some(shutdown_subscriber),
         }
     }
 }
@@ -68,7 +72,7 @@ impl<S> SqsConsumer<S>
 impl<S> SqsConsumer<S>
     where S: Sqs + Clone + Send + 'static
 {
-    pub fn get_new_event(&mut self, event_processor: EventProcessorActor) {
+    pub async fn get_new_event(&mut self, event_processor: EventProcessorActor) {
         let should_consume = self.consume_policy.should_consume();
 
         if self.stored_events.len() == 0 && should_consume {
@@ -76,7 +80,14 @@ impl<S> SqsConsumer<S>
             self.stored_events.extend(new_events);
         }
 
-        // What if we have no events? After a certain point the lambda should just shut down
+        if self.stored_events.is_empty() && !should_consume {
+            let shutdown_subscriber = std::mem::replace(&mut self.shutdown_subscriber, None);
+            match shutdown_subscriber {
+                Some(shutdown_subscriber) => shutdown_subscriber.send(()).unwrap(),
+                None => panic!("Attempted to shut down with empty shutdown_subscriber")
+            }
+        }
+
         if let Some(next_event) = self.stored_events.pop() {
             event_processor.process_event(next_event);
         }
@@ -106,10 +117,10 @@ pub enum SqsConsumerMessage {
 impl<S> SqsConsumer<S>
     where S: Sqs + Clone + Send + 'static
 {
-    pub fn route_message(&mut self, msg: SqsConsumerMessage) {
+    pub async fn route_message(&mut self, msg: SqsConsumerMessage) {
         match msg {
             SqsConsumerMessage::get_new_event { event_processor } => {
-                self.get_new_event(event_processor)
+                self.get_new_event(event_processor).await
             }
         };
     }
@@ -126,44 +137,72 @@ impl SqsConsumerActor {
     {
         let (sender, receiver) = channel(0);
 
-        tokio::spawn(SqsConsumerRouter {
+        tokio::task::spawn(SqsConsumerRouter {
             receiver,
             actor_impl,
         });
         Self { sender }
     }
 
-    pub fn get_new_event(&self, event_processor: EventProcessorActor) {
+    pub async fn get_new_event(&self, event_processor: EventProcessorActor) {
         let msg = SqsConsumerMessage::get_new_event { event_processor };
-        tokio::spawn(self.sender.clone().send(msg).map(|_| ()).map_err(|_| ()));
+        self.sender.clone().send(msg).await.map(|_| ()).map_err(|_| ());
     }
 }
+
+use futures::stream::Stream;
+use pin_utils::unsafe_pinned;
+
+
+
+use std::marker::Unpin;
 
 pub struct SqsConsumerRouter<S>
     where S: Sqs + Clone + Send + 'static
 {
-    receiver: Receiver<SqsConsumerMessage>,
+    receiver: tokio::sync::mpsc::Receiver<SqsConsumerMessage>,
     actor_impl: SqsConsumer<S>,
 }
+
+use pin_utils::pin_mut;
 
 impl<S> Future for SqsConsumerRouter<S>
     where S: Sqs + Clone + Send + 'static
 {
-    type Item = ();
-    type Error = ();
+    type Output = ();
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.receiver.poll() {
-            Ok(futures::Async::Ready(Some(msg))) => {
-                task::current().notify();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let received = {
+            let mut receiver = unsafe {
+                self.as_mut().map_unchecked_mut(|me| {
+                    &mut me.receiver
+                })
+            };
+
+            let received = receiver.poll_recv(cx);
+            received
+        };
+
+
+        match received {
+            Poll::Ready(Some(msg)) => {
+                cx.waker().wake_by_ref();
+
+                // route_message is async
                 self.actor_impl.route_message(msg);
-                Ok(futures::Async::NotReady)
+
+                Poll::Pending
             }
-            Ok(futures::Async::Ready(None)) => {
-                self.receiver.close();
-                Ok(futures::Async::Ready(()))
+            Poll::Ready(None) => {
+                unsafe {
+                    self.as_mut().map_unchecked_mut(|me| {
+                        me.receiver.close();
+                        &mut me.receiver
+                    })
+                };
+                Poll::Ready(())
             }
-            _ => Ok(futures::Async::NotReady),
+            _ => Poll::Pending,
         }
     }
 }
