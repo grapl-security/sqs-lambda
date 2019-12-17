@@ -63,16 +63,19 @@ pub struct SubgraphSerializer {}
 impl CompletionEventSerializer for SubgraphSerializer {
     type CompletedEvent = Subgraph;
     type Output = Vec<u8>;
+    type Error = ();
+
     fn serialize_completed_events(
         &mut self,
         completed_events: &[Self::CompletedEvent],
-    ) -> Self::Output {
+    ) -> Result<Self::Output, Self::Error> {
         let mut subgraph = Subgraph {};
         for sg in completed_events {
             subgraph.merge(sg);
         }
 
-        subgraph.into_bytes()
+//        subgraph.into_bytes()
+        Ok(vec![])
     }
 }
 
@@ -168,7 +171,7 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let consume_policy = ConsumePolicy::new(
-            0, // Use the Context.deadline from the lambda_runtime
+            unimplemented!(), // Use the Context.deadline from the lambda_runtime
             Duration::from_secs(5), // Stop consuming when there's 10 seconds left in the runtime
         );
 

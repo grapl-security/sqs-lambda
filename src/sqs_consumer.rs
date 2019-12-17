@@ -8,26 +8,22 @@ use tokio::sync::mpsc::{channel, Sender};
 use async_trait::async_trait;
 
 use crate::event_processor::EventProcessorActor;
+use lambda_runtime::Context;
 
 pub struct ConsumePolicy {
-    deadline: i64,
+    context: Context,
     stop_at: Duration
 }
 
 impl ConsumePolicy {
-    pub fn new(deadline: i64, stop_at: Duration) -> Self {
+    pub fn new(context: Context, stop_at: Duration) -> Self {
         Self {
-            deadline, stop_at
+            context, stop_at
         }
     }
 
     pub fn should_consume(&self) -> bool {
-        let cur_secs = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(n) => n.as_secs() as i64,
-            Err(_) => panic!("SystemTime before UNIX EPOCH!"),
-        };
-
-        cur_secs <= self.deadline - (self.stop_at.as_millis() as i64)
+        self.stop_at.as_millis() <= self.context.get_time_remaining_millis() as u128
     }
 }
 

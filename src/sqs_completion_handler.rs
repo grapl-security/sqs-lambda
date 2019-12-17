@@ -31,10 +31,11 @@ impl CompletionPolicy {
     }
 }
 
-pub struct SqsCompletionHandler<CP, CE, Payload, EE>
+pub struct SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload> + Send + Sync  + 'static,
-    Payload: Send  + 'static,
+    CPE: Send + Sync + 'static,
+    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
+    Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
     EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
 {
@@ -47,10 +48,11 @@ where
     completion_policy: CompletionPolicy,
 }
 
-impl<CP, CE, Payload, EE> SqsCompletionHandler<CP, CE, Payload, EE>
+impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload> + Send + Sync  + 'static,
-    Payload: Send  + 'static,
+    CPE: Send + Sync + 'static,
+    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
+    Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
     EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
 {
@@ -72,10 +74,12 @@ where
         }
     }
 }
-impl<CP, CE, Payload, EE> SqsCompletionHandler<CP, CE, Payload, EE>
+
+impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload> + Send + Sync  + 'static,
-    Payload: Send  + 'static,
+    CPE: Send + Sync + 'static,
+    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync + 'static,
+    Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
     EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
 {
@@ -88,6 +92,18 @@ where
                 .completion_serializer
                 .serialize_completed_events(&self.completed_events[..]);
 
+            let serialized_event = match serialized_event {
+                Ok(serialized_event) => serialized_event,
+                Err(e) => {
+                    // We should emit a failure, but ultimately we just have to not ack these messages
+
+                    self.completed_events.clear();
+                    self.completed_messages.clear();
+
+                    return
+                }
+            };
+            
             // TODO: Retry on failure
             self.event_emitter.emit_event(serialized_event).await.unwrap();
 
@@ -130,10 +146,11 @@ where
     ack_all {},
 }
 
-impl<CP, CE, Payload, EE> SqsCompletionHandler<CP, CE, Payload, EE>
+impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload> + Send + Sync  + 'static,
-    Payload: Send  + 'static,
+    CPE: Send + Sync + 'static,
+    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
+    Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
     EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
 {
@@ -159,14 +176,15 @@ impl<CE> SqsCompletionHandlerActor<CE>
 where
     CE: Send + Sync  + 'static,
 {
-    pub fn new<CP, Payload, EE>(actor_impl: SqsCompletionHandler<CP, CE, Payload, EE>) -> Self
+    pub fn new<CPE, CP, Payload, EE>(actor_impl: SqsCompletionHandler<CPE, CP, CE, Payload, EE>) -> Self
     where
-        CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload>
+        CPE: Send + Sync + 'static,
+        CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE>
             + Send
             + Sync
             
             + 'static,
-        Payload: Send  + 'static,
+        Payload: Send + Sync + 'static,
         EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
     {
         let (sender, receiver) = channel(0);
@@ -222,22 +240,24 @@ where
     }
 }
 
-pub struct SqsCompletionHandlerRouter<CP, CE, Payload, EE>
+pub struct SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE>
 where
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload> + Send + Sync  + 'static,
-    Payload: Send  + 'static,
+    CPE: Send + Sync + 'static,
+    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
+    Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
     EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
 {
     receiver: Receiver<SqsCompletionHandlerMessage<CE>>,
-    actor_impl: SqsCompletionHandler<CP, CE, Payload, EE>,
+    actor_impl: SqsCompletionHandler<CPE, CP, CE, Payload, EE>,
 }
 
 
-async fn route_wrapper<CP, CE, Payload, EE>(mut router: SqsCompletionHandlerRouter<CP, CE, Payload, EE>)
+async fn route_wrapper<CPE, CP, CE, Payload, EE>(mut router: SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE>)
     where
-        CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload> + Send + Sync  + 'static,
-        Payload: Send  + 'static,
+        CPE: Send + Sync + 'static,
+        CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
+        Payload: Send + Sync + 'static,
         CE: Send + Sync  + 'static,
         EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
 {
