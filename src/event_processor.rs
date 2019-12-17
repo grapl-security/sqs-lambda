@@ -144,7 +144,7 @@ impl EventProcessorActor {
         ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
         CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
     {
-        let (sender, receiver) = channel(0);
+        let (sender, receiver) = channel(1);
 
         tokio::task::spawn(
             route_wrapper(

@@ -127,7 +127,7 @@ impl SqsConsumerActor {
     pub fn new<S>(actor_impl: SqsConsumer<S>) -> Self
         where S: Sqs  + Send + Sync + 'static
     {
-        let (sender, receiver) = channel(0);
+        let (sender, receiver) = channel(1);
 
         tokio::task::spawn(
             route_wrapper(

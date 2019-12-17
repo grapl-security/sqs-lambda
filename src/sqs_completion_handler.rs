@@ -187,7 +187,7 @@ where
         Payload: Send + Sync + 'static,
         EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
     {
-        let (sender, receiver) = channel(0);
+        let (sender, receiver) = channel(1);
 
         tokio::task::spawn(
             route_wrapper(
