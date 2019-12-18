@@ -127,7 +127,7 @@ where
                     entries,
                     queue_url: self.queue_url.clone()
                 }
-            ).compat()
+            ).with_timeout(Duration::from_secs(2)).compat()
         });
 
         futures::future::join_all(acks).await;

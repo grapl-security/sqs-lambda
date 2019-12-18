@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use rusoto_s3::{S3, PutObjectRequest};
 use futures::compat::Future01CompatExt;
 use std::error::Error;
+use std::time::Duration;
 
 #[async_trait]
 pub trait EventEmitter {
@@ -54,7 +55,7 @@ impl<S, F> EventEmitter for S3EventEmitter<S, F>
                 key,
                 ..Default::default()
             }
-        ).compat().await?;
+        ).with_timeout(Duration::from_secs(2)).compat().await?;
 
         Ok(())
     }

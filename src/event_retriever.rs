@@ -7,6 +7,7 @@ use futures::compat::Future01CompatExt;
 use std::error::Error;
 use std::io::Read;
 use async_trait::async_trait;
+use std::time::Duration;
 
 #[async_trait]
 pub trait EventRetriever<T> {
@@ -53,7 +54,7 @@ impl<S, D, E> EventRetriever<E> for S3EventRetriever<S, D, E>
                 key: record.object.key.clone().unwrap(),
                 ..Default::default()
             }
-        ).compat().await?;
+        ).with_timeout(Duration::from_secs(2)).compat().await?;
 
         let mut body = Vec::new();
         s3_data.body.unwrap().into_async_read().read_to_end(&mut body)?;

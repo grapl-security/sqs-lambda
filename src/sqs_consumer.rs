@@ -2,7 +2,7 @@ use std::error::Error;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::compat::Future01CompatExt;
 
-use log::info;
+use log::{info, warn};
 use rusoto_sqs::{ReceiveMessageRequest, Sqs};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Sender};
@@ -24,7 +24,7 @@ impl ConsumePolicy {
     }
 
     pub fn should_consume(&self) -> bool {
-        self.stop_at.as_millis() >= self.context.get_time_remaining_millis() as u128
+        self.stop_at.as_millis() <= self.context.get_time_remaining_millis() as u128
     }
 }
 
@@ -76,7 +76,7 @@ impl<S> SqsConsumer<S>
             let shutdown_subscriber = std::mem::replace(&mut self.shutdown_subscriber, None);
             match shutdown_subscriber {
                 Some(shutdown_subscriber) => shutdown_subscriber.send(()).unwrap(),
-                None => panic!("Attempted to shut down with empty shutdown_subscriber")
+                None => warn!("Attempted to shut down with empty shutdown_subscriber")
             }
         }
 
@@ -93,7 +93,7 @@ impl<S> SqsConsumer<S>
                 wait_time_seconds: Some(1),
                 ..Default::default()
             }
-        ).compat().await?;
+        ).with_timeout(Duration::from_secs(2)).compat().await?;
 
 
 
