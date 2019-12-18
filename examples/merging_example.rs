@@ -179,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let sqs_consumer = SqsConsumerActor::new(
             SqsConsumer::new(init_sqs_client(), "queue_url".into(), consume_policy, tx)
-        );
+        ).await;
 
         let sqs_completion_handler = SqsCompletionHandlerActor::new(
             SqsCompletionHandler::new(

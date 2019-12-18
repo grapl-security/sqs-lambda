@@ -2,6 +2,7 @@ use std::error::Error;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::compat::Future01CompatExt;
 
+use log::info;
 use rusoto_sqs::{ReceiveMessageRequest, Sqs};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Sender};
@@ -23,7 +24,7 @@ impl ConsumePolicy {
     }
 
     pub fn should_consume(&self) -> bool {
-        self.stop_at.as_millis() <= self.context.get_time_remaining_millis() as u128
+        self.stop_at.as_millis() >= self.context.get_time_remaining_millis() as u128
     }
 }
 
@@ -71,6 +72,7 @@ impl<S> SqsConsumer<S>
         }
 
         if self.stored_events.is_empty() && !should_consume {
+            info!("No more events to process, and no time to consume more");
             let shutdown_subscriber = std::mem::replace(&mut self.shutdown_subscriber, None);
             match shutdown_subscriber {
                 Some(shutdown_subscriber) => shutdown_subscriber.send(()).unwrap(),
@@ -86,7 +88,7 @@ impl<S> SqsConsumer<S>
     pub async fn batch_get_events(&self) -> Result<Vec<SqsMessage>, Box<dyn Error>> {
         let recv = self.sqs_client.receive_message(
             ReceiveMessageRequest {
-                max_number_of_messages: Some(20),
+                max_number_of_messages: Some(10),
                 queue_url: self.queue_url.clone(),
                 wait_time_seconds: Some(1),
                 ..Default::default()
