@@ -1,8 +1,9 @@
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use log::*;
 
 use crate::event_handler::EventHandler;
-use crate::event_retriever::EventRetriever;
+use crate::event_retriever::PayloadRetriever;
 use crate::sqs_completion_handler::CompletionHandler;
 use crate::sqs_consumer::Consumer;
 
@@ -20,7 +21,7 @@ where
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
-    ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
+    ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
     CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
 {
     consumer: C,
@@ -28,6 +29,7 @@ where
     event_retriever: ER,
     event_handler: EH,
     state: ProcessorState,
+    self_actor: Option<EventProcessorActor>,
 }
 
 impl<C, EH, Input, Output, ER, CH> EventProcessor<C, EH, Input, Output, ER, CH>
@@ -36,7 +38,7 @@ where
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
-    ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
+    ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
     CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
 {
     pub fn new(
@@ -51,6 +53,7 @@ where
             event_handler,
             event_retriever,
             state: ProcessorState::Waiting,
+            self_actor: None,
         }
     }
 }
@@ -61,42 +64,47 @@ where
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
-    ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
+    ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
 CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
 {
     pub async fn process_event(&mut self, event: SqsMessage) {
         // TODO: Handle errors
+        info!("Retrieved event");
         let retrieved_event = match self.event_retriever.retrieve_event(&event).await {
             Ok(retrieved_event) => retrieved_event,
-            Err(_e) => {
+            Err(e) => {
+                warn!("Failed to retrieve event with: {:?}", e);
                 return
                 // TODO: Retry
                 // TODO: We could reset the message visibility to 0 so it gets picked up again?
             }
         };
-
+        info!("Handling event");
         let completed = match self.event_handler.handle_event(retrieved_event).await {
             Ok(completed) => completed,
-            Err(_e) => {
+            Err(e) => {
+                info!("Event handler failed: {:?}", e);
                 return
                 // TODO: Retry
                 // TODO: We could reset the message visibility to 0 so it gets picked up again?
             }
         };
 
+        info!("Marking event complete");
         self.completion_handler.mark_complete(event, completed).await;
 
         if let ProcessorState::Started = self.state {
             self.consumer
-                .get_next_event(EventProcessorActor::new(self.clone())).await;
+                .get_next_event(self.self_actor.clone().unwrap()).await;
         }
     }
 
     pub async fn start_processing(&mut self) {
         self.state = ProcessorState::Started;
 
+        info!("Getting next event from consumer");
         self.consumer
-            .get_next_event(EventProcessorActor::new(self.clone())).await;
+            .get_next_event(self.self_actor.clone().unwrap()).await;
     }
 
     pub fn stop_processing(&mut self) {
@@ -117,7 +125,7 @@ where
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
-    ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
+    ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
     CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
 {
     pub async fn route_message(&mut self, msg: EventProcessorMessage) {
@@ -135,16 +143,19 @@ pub struct EventProcessorActor {
 }
 
 impl EventProcessorActor {
-    pub fn new<C, EH, Input, Output, ER, CH>(actor_impl: EventProcessor<C, EH, Input, Output, ER, CH>) -> Self
+    pub fn new<C, EH, Input, Output, ER, CH>(mut actor_impl: EventProcessor<C, EH, Input, Output, ER, CH>) -> Self
     where
         C: Consumer + Clone + Send + Sync + 'static,
         EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
         Input: Send + Clone + 'static,
         Output: Send + Sync + Clone + 'static,
-        ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
+        ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
         CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
     {
         let (sender, receiver) = channel(1);
+
+        let self_actor = Self {sender};
+        actor_impl.self_actor = Some(self_actor.clone());
 
         tokio::task::spawn(
             route_wrapper(
@@ -155,7 +166,7 @@ impl EventProcessorActor {
             )
         );
 
-        Self { sender }
+        self_actor
     }
 
     pub async fn process_event(&self, event: SqsMessage) {
@@ -186,7 +197,7 @@ where
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
-    ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
+    ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
     CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
 {
     receiver: Receiver<EventProcessorMessage>,
@@ -200,7 +211,7 @@ where
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
-    ER: EventRetriever<Input> + Send + Sync + Clone + 'static,
+    ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
     CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
 {
     while let Some(msg) = router.receiver.recv().await {

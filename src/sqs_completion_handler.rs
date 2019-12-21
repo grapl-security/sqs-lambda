@@ -1,6 +1,9 @@
 use std::time::{Duration, Instant};
 
+use log::*;
+use std::fmt::Debug;
 use futures::compat::Future01CompatExt;
+use futures_retry::{RetryPolicy, StreamRetryExt};
 use rusoto_sqs::{DeleteMessageBatchRequest, DeleteMessageBatchRequestEntry, Sqs, SqsClient};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -33,7 +36,7 @@ impl CompletionPolicy {
 
 pub struct SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CPE: Send + Sync + 'static,
+    CPE: Debug + Send + Sync + 'static,
     CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
     Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
@@ -50,7 +53,7 @@ where
 
 impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CPE: Send + Sync + 'static,
+    CPE: Debug + Send + Sync + 'static,
     CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
     Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
@@ -77,7 +80,7 @@ where
 
 impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CPE: Send + Sync + 'static,
+    CPE: Debug + Send + Sync + 'static,
     CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync + 'static,
     Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
@@ -88,36 +91,40 @@ where
         self.completed_messages.push(sqs_message);
 
         if self.completion_policy.should_flush(self.completed_events.len() as u16) {
-            let serialized_event = self
-                .completion_serializer
-                .serialize_completed_events(&self.completed_events[..]);
-
-            let serialized_event = match serialized_event {
-                Ok(serialized_event) => serialized_event,
-                Err(e) => {
-                    // We should emit a failure, but ultimately we just have to not ack these messages
-
-                    self.completed_events.clear();
-                    self.completed_messages.clear();
-
-                    return
-                }
-            };
-            
-            // TODO: Retry on failure
-            self.event_emitter.emit_event(serialized_event).await.unwrap();
-
-            self.ack_all().await;
+            self.ack_all(None).await;
             self.completion_policy.set_last_flush();
         }
     }
-    pub async fn ack_all(&mut self) {
+
+    pub async fn ack_all(&mut self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
+        info!("Flushing completed events");
+        let serialized_event = self
+            .completion_serializer
+            .serialize_completed_events(&self.completed_events[..]);
+
+        let serialized_event = match serialized_event {
+            Ok(serialized_event) => serialized_event,
+            Err(e) => {
+                // We should emit a failure, but ultimately we just have to not ack these messages
+                warn!("Serializing events failed: {:?}", e);
+
+                self.completed_events.clear();
+                self.completed_messages.clear();
+
+                return
+            }
+        };
+
+        info!("Emitting events");
+        self.event_emitter.emit_event(serialized_event).await.expect(
+            "Failed to emit event"
+        );
 
         let acks =
         self.completed_messages.chunks(10).map(|chunk| {
             let entries = chunk.iter().map(|msg| {
                 DeleteMessageBatchRequestEntry {
-                    id: "".to_string(),
+                    id: uuid::Uuid::new_v4().to_string(),
                     receipt_handle: msg.receipt_handle.clone().expect("Message missing receipt")
                 }
             }).collect();
@@ -130,10 +137,21 @@ where
             ).with_timeout(Duration::from_secs(2)).compat()
         });
 
-        futures::future::join_all(acks).await;
+        info!("Acking all messages");
+        let results = futures::future::join_all(acks).await;
+        for result in results {
+            if let Err(e) = result {
+                warn!("Failed to acknowledge event: {:?}", e);
+            }
+        }
+        info!("Acked");
 
         self.completed_events.clear();
         self.completed_messages.clear();
+
+        if let Some(notify) = notify {
+            let _ = notify.send(());
+        }
     }
 }
 
@@ -143,12 +161,12 @@ where
     CE: Send + Sync  + 'static,
 {
     mark_complete { msg: SqsMessage, completed: CE },
-    ack_all {},
+    ack_all { notify: Option<tokio::sync::oneshot::Sender<()>> },
 }
 
 impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
 where
-    CPE: Send + Sync + 'static,
+    CPE: Debug + Send + Sync + 'static,
     CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
     Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
@@ -159,7 +177,7 @@ where
             SqsCompletionHandlerMessage::mark_complete { msg, completed } => {
                 self.mark_complete(msg, completed).await
             }
-            SqsCompletionHandlerMessage::ack_all {} => self.ack_all().await,
+            SqsCompletionHandlerMessage::ack_all { notify } => self.ack_all(notify).await,
         };
     }
 }
@@ -178,7 +196,7 @@ where
 {
     pub fn new<CPE, CP, Payload, EE>(actor_impl: SqsCompletionHandler<CPE, CP, CE, Payload, EE>) -> Self
     where
-        CPE: Send + Sync + 'static,
+        CPE: Debug + Send + Sync + 'static,
         CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE>
             + Send
             + Sync
@@ -207,8 +225,8 @@ where
             panic!("Receiver has failed, propagating error. mark_complete")
         }
     }
-    pub async fn ack_all(&self) {
-        let msg = SqsCompletionHandlerMessage::ack_all {};
+    async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
+        let msg = SqsCompletionHandlerMessage::ack_all { notify };
         if let Err(_e) = self.sender.clone().send(msg).await {
             panic!("Receiver has failed, propagating error. ack_all")
         }
@@ -223,6 +241,7 @@ pub trait CompletionHandler {
     type CompletedEvent;
 
     async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent);
+    async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>);
 }
 
 #[async_trait]
@@ -238,11 +257,17 @@ where
             self, msg, completed_event
         ).await
     }
+
+    async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
+        SqsCompletionHandlerActor::ack_all(
+            self, notify
+        ).await
+    }
 }
 
 pub struct SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE>
 where
-    CPE: Send + Sync + 'static,
+    CPE: Debug + Send + Sync + 'static,
     CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
     Payload: Send + Sync + 'static,
     CE: Send + Sync  + 'static,
@@ -255,7 +280,7 @@ where
 
 async fn route_wrapper<CPE, CP, CE, Payload, EE>(mut router: SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE>)
     where
-        CPE: Send + Sync + 'static,
+        CPE: Debug + Send + Sync + 'static,
         CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
         Payload: Send + Sync + 'static,
         CE: Send + Sync  + 'static,

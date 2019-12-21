@@ -1,6 +1,6 @@
 [package]
 name = "sqs-lambda"
-version = "0.11.0"
+version = "0.12.0"
 authors = ["Insanitybit <insanitybit@gmail.com>"]
 edition = "2018"
 description = 'SQS Service helper library'
@@ -26,3 +26,6 @@ lambda_runtime = "0.2.1"
 
 uuid = { version = "0.8.1", features = ["v4"] }
 log = "0.4.8"
+futures-retry = "0.3.3"
+rand = "0.7.2"
+rand_xorshift = "0.2.0"

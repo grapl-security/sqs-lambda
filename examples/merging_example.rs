@@ -19,11 +19,11 @@ use event_processor::*;
 use sqs_completion_handler::*;
 use sqs_consumer::*;
 use sqs_lambda::completion_event_serializer::CompletionEventSerializer;
-use sqs_lambda::event_decoder::EventDecoder;
+use sqs_lambda::event_decoder::PayloadDecoder;
 use sqs_lambda::event_emitter::{S3EventEmitter};
 use sqs_lambda::event_handler::EventHandler;
 use sqs_lambda::event_processor;
-use sqs_lambda::event_retriever::S3EventRetriever;
+use sqs_lambda::event_retriever::S3PayloadRetriever;
 use sqs_lambda::sqs_completion_handler;
 use sqs_lambda::sqs_consumer;
 
@@ -82,7 +82,7 @@ impl CompletionEventSerializer for SubgraphSerializer {
 #[derive(Clone)]
 pub struct ZstdProtoDecoder;
 
-impl<E> EventDecoder<E> for ZstdProtoDecoder
+impl<E> PayloadDecoder<E> for ZstdProtoDecoder
     where E: Message + Default
 {
 
@@ -105,7 +105,7 @@ pub struct ZstdDecoder {
     pub buffer: Vec<u8>
 }
 
-impl EventDecoder<Vec<u8>> for ZstdDecoder
+impl PayloadDecoder<Vec<u8>> for ZstdDecoder
 {
 
     fn decode(&mut self, body: Vec<u8>) -> Result<Vec<u8>, Box<dyn Error>>
@@ -125,7 +125,7 @@ pub struct ZstdJsonDecoder {
     pub buffer: Vec<u8>
 }
 
-impl<E> EventDecoder<E> for ZstdJsonDecoder
+impl<E> PayloadDecoder<E> for ZstdJsonDecoder
     where E: for<'a> Deserialize<'a>
 {
 
@@ -205,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     sqs_consumer.clone(),
                     sqs_completion_handler.clone(),
                     MyService {},
-                    S3EventRetriever::new(init_s3_client(), ZstdJsonDecoder::default()),
+                    S3PayloadRetriever::new(init_s3_client(), ZstdJsonDecoder::default()),
                 ))
             })
             .collect();
