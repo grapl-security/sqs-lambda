@@ -5,5 +5,5 @@ pub trait CompletionEventSerializer {
     fn serialize_completed_events(
         &mut self,
         completed_events: &[Self::CompletedEvent],
-    ) -> Result<Self::Output, Self::Error>;
+    ) -> Result<Vec<Self::Output>, Self::Error>;
 }

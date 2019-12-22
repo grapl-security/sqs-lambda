@@ -68,7 +68,7 @@ impl CompletionEventSerializer for SubgraphSerializer {
     fn serialize_completed_events(
         &mut self,
         completed_events: &[Self::CompletedEvent],
-    ) -> Result<Self::Output, Self::Error> {
+    ) -> Result<Vec<Self::Output>, Self::Error> {
         let mut subgraph = Subgraph {};
         for sg in completed_events {
             subgraph.merge(sg);
@@ -179,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let sqs_consumer = SqsConsumerActor::new(
             SqsConsumer::new(init_sqs_client(), "queue_url".into(), consume_policy, tx)
-        ).await;
+        );
 
         let sqs_completion_handler = SqsCompletionHandlerActor::new(
             SqsCompletionHandler::new(
