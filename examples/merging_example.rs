@@ -29,7 +29,9 @@ use sqs_lambda::sqs_consumer;
 use sqs_lambda::redis_cache::RedisCache;
 
 #[derive(Debug, Clone)]
-struct MyService {}
+struct MyService {
+    cache: RedisCache,
+}
 
 #[async_trait]
 impl EventHandler for MyService {
@@ -39,8 +41,6 @@ impl EventHandler for MyService {
 
     async fn handle_event(&mut self, _input: Self::InputEvent) -> OutputEvent<Self::OutputEvent, Self::Error> {
         // do some work
-
-
         let mut completed = OutputEvent::new(Completion::Total(Subgraph{}));
 
         for input in _input.keys() {
@@ -221,7 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 EventProcessorActor::new(EventProcessor::new(
                     sqs_consumer.clone(),
                     sqs_completion_handler.clone(),
-                    MyService {},
+                    MyService { cache: cache.clone() },
                     S3PayloadRetriever::new(init_s3_client(), ZstdJsonDecoder::default()),
                     cache.clone()
                 ))
