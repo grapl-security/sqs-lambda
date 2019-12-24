@@ -1,10 +1,9 @@
-
-use rand::{SeedableRng, Rng};
-use futures_retry::{ErrorHandler, RetryPolicy};
-use std::io;
 use std::time::Duration;
-use rusoto_core::RusotoError;
+
+use futures_retry::{ErrorHandler, RetryPolicy};
+use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
+use rusoto_core::RusotoError;
 
 pub struct RetryHandler {
     attempt: u8,

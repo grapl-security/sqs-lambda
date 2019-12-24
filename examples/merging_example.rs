@@ -20,12 +20,13 @@ use sqs_completion_handler::*;
 use sqs_consumer::*;
 use sqs_lambda::completion_event_serializer::CompletionEventSerializer;
 use sqs_lambda::event_decoder::PayloadDecoder;
-use sqs_lambda::event_emitter::{S3EventEmitter};
-use sqs_lambda::event_handler::EventHandler;
+use sqs_lambda::event_emitter::S3EventEmitter;
+use sqs_lambda::event_handler::{EventHandler, OutputEvent, Completion};
 use sqs_lambda::event_processor;
 use sqs_lambda::event_retriever::S3PayloadRetriever;
 use sqs_lambda::sqs_completion_handler;
 use sqs_lambda::sqs_consumer;
+use sqs_lambda::redis_cache::RedisCache;
 
 #[derive(Debug, Clone)]
 struct MyService {}
@@ -36,10 +37,17 @@ impl EventHandler for MyService {
     type OutputEvent = Subgraph;
     type Error = ();
 
-    async fn handle_event(&mut self, _input: Self::InputEvent) -> Result<Self::OutputEvent, Self::Error> {
+    async fn handle_event(&mut self, _input: Self::InputEvent) -> OutputEvent<Self::OutputEvent, Self::Error> {
         // do some work
 
-        Ok(Subgraph {})
+
+        let mut completed = OutputEvent::new(Completion::Total(Subgraph{}));
+
+        for input in _input.keys() {
+            completed.add_identity(input);
+        }
+        completed
+
     }
 }
 
@@ -85,7 +93,6 @@ pub struct ZstdProtoDecoder;
 impl<E> PayloadDecoder<E> for ZstdProtoDecoder
     where E: Message + Default
 {
-
     fn decode(&mut self, body: Vec<u8>) -> Result<E, Box<dyn Error>>
         where E: Message + Default,
     {
@@ -97,7 +104,6 @@ impl<E> PayloadDecoder<E> for ZstdProtoDecoder
 
         Ok(E::decode(decompressed)?)
     }
-
 }
 
 #[derive(Clone, Default)]
@@ -107,7 +113,6 @@ pub struct ZstdDecoder {
 
 impl PayloadDecoder<Vec<u8>> for ZstdDecoder
 {
-
     fn decode(&mut self, body: Vec<u8>) -> Result<Vec<u8>, Box<dyn Error>>
     {
         self.buffer.clear();
@@ -128,7 +133,6 @@ pub struct ZstdJsonDecoder {
 impl<E> PayloadDecoder<E> for ZstdJsonDecoder
     where E: for<'a> Deserialize<'a>
 {
-
     fn decode(&mut self, body: Vec<u8>) -> Result<E, Box<dyn Error>>
     {
         self.buffer.clear();
@@ -170,16 +174,17 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
+        let cache = RedisCache::new("address".to_owned()).expect("Could not create redis client");
+
+
         let consume_policy = ConsumePolicy::new(
             unimplemented!(), // Use the Context.deadline from the lambda_runtime
             Duration::from_secs(5), // Stop consuming when there's 10 seconds left in the runtime
+            3, // Maximum of 3 empty receives before we stop
         );
 
         let (tx, shutdown_notify) = tokio::sync::oneshot::channel();
 
-        let sqs_consumer = SqsConsumerActor::new(
-            SqsConsumer::new(init_sqs_client(), "queue_url".into(), consume_policy, tx)
-        );
 
         let sqs_completion_handler = SqsCompletionHandlerActor::new(
             SqsCompletionHandler::new(
@@ -194,7 +199,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 CompletionPolicy::new(
                     1000, // Buffer up to 1000 messages
                     Duration::from_secs(30), // Buffer for up to 30 seconds
-                )
+                ),
+                |_, _| {}
+            )
+        );
+
+
+        let sqs_consumer = SqsConsumerActor::new(
+            SqsConsumer::new(
+                init_sqs_client(),
+                "queue_url".into(),
+                consume_policy,
+                sqs_completion_handler.clone(),
+                tx
             )
         );
 
@@ -206,6 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     sqs_completion_handler.clone(),
                     MyService {},
                     S3PayloadRetriever::new(init_s3_client(), ZstdJsonDecoder::default()),
+                    cache.clone()
                 ))
             })
             .collect();
@@ -216,7 +234,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = shutdown_notify.await;
 
         tokio::time::delay_for(Duration::from_millis(100)).await;
-
     });
 
     Ok(())

@@ -1,12 +1,13 @@
+use std::fmt::Debug;
 use std::time::{Duration, Instant};
 
-use log::*;
-use std::fmt::Debug;
 use futures::compat::Future01CompatExt;
-use futures_retry::{RetryPolicy, StreamRetryExt};
+use log::*;
 use rusoto_sqs::{DeleteMessageBatchRequest, DeleteMessageBatchRequestEntry, Sqs, SqsClient};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+
+use async_trait::async_trait;
 
 use crate::completion_event_serializer::CompletionEventSerializer;
 use crate::event_emitter::EventEmitter;
@@ -20,7 +21,9 @@ pub struct CompletionPolicy {
 impl CompletionPolicy {
     pub fn new(max_messages: u16, max_time_between_flushes: Duration) -> Self {
         Self {
-            max_messages, max_time_between_flushes, last_flush: Instant::now()
+            max_messages,
+            max_time_between_flushes,
+            last_flush: Instant::now(),
         }
     }
 
@@ -34,13 +37,14 @@ impl CompletionPolicy {
     }
 }
 
-pub struct SqsCompletionHandler<CPE, CP, CE, Payload, EE>
-where
-    CPE: Debug + Send + Sync + 'static,
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
-    Payload: Send + Sync + 'static,
-    CE: Send + Sync  + 'static,
-    EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
+pub struct SqsCompletionHandler<CPE, CP, CE, Payload, EE, OA>
+    where
+        CPE: Debug + Send + Sync + 'static,
+        CP: CompletionEventSerializer<CompletedEvent=CE, Output=Payload, Error=CPE> + Send + Sync + 'static,
+        Payload: Send + Sync + 'static,
+        CE: Send + Sync + Clone + 'static,
+        EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
+        OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
 {
     sqs_client: SqsClient,
     queue_url: String,
@@ -49,15 +53,18 @@ where
     completion_serializer: CP,
     event_emitter: EE,
     completion_policy: CompletionPolicy,
+    on_ack: OA,
+    self_actor: Option<SqsCompletionHandlerActor<CE>>
 }
 
-impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
-where
-    CPE: Debug + Send + Sync + 'static,
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
-    Payload: Send + Sync + 'static,
-    CE: Send + Sync  + 'static,
-    EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
+impl<CPE, CP, CE, Payload, EE, OA> SqsCompletionHandler<CPE, CP, CE, Payload, EE, OA>
+    where
+        CPE: Debug + Send + Sync + 'static,
+        CP: CompletionEventSerializer<CompletedEvent=CE, Output=Payload, Error=CPE> + Send + Sync + 'static,
+        Payload: Send + Sync + 'static,
+        CE: Send + Sync + Clone + 'static,
+        EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
+        OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
 {
     pub fn new(
         sqs_client: SqsClient,
@@ -65,6 +72,7 @@ where
         completion_serializer: CP,
         event_emitter: EE,
         completion_policy: CompletionPolicy,
+        on_ack: OA,
     ) -> Self {
         Self {
             sqs_client,
@@ -73,18 +81,21 @@ where
             completed_messages: Vec::with_capacity(10),
             completion_serializer,
             event_emitter,
-            completion_policy
+            completion_policy,
+            on_ack,
+            self_actor: None,
         }
     }
 }
 
-impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
-where
-    CPE: Debug + Send + Sync + 'static,
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync + 'static,
-    Payload: Send + Sync + 'static,
-    CE: Send + Sync  + 'static,
-    EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
+impl<CPE, CP, CE, Payload, EE, OA> SqsCompletionHandler<CPE, CP, CE, Payload, EE, OA>
+    where
+        CPE: Debug + Send + Sync + 'static,
+        CP: CompletionEventSerializer<CompletedEvent=CE, Output=Payload, Error=CPE> + Send + Sync + 'static,
+        Payload: Send + Sync + 'static,
+        CE: Send + Sync + Clone + 'static,
+        EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
+        OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
 {
     pub async fn mark_complete(&mut self, sqs_message: SqsMessage, completed: CE) {
         self.completed_events.push(completed);
@@ -111,7 +122,7 @@ where
                 self.completed_events.clear();
                 self.completed_messages.clear();
 
-                return
+                return;
             }
         };
 
@@ -120,29 +131,54 @@ where
             "Failed to emit event"
         );
 
-        let acks =
-        self.completed_messages.chunks(10).map(|chunk| {
+        let mut acks = vec![];
+
+        for chunk in self.completed_messages.chunks(10) {
+            let msg_ids: Vec<String> = chunk.iter().map(|msg| {
+                msg.message_id.clone().unwrap()
+            }).collect();
+
             let entries = chunk.iter().map(|msg| {
                 DeleteMessageBatchRequestEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    receipt_handle: msg.receipt_handle.clone().expect("Message missing receipt")
+                    id: msg.message_id.clone().unwrap(),
+                    receipt_handle: msg.receipt_handle.clone().expect("Message missing receipt"),
                 }
             }).collect();
 
-            self.sqs_client.delete_message_batch(
-                DeleteMessageBatchRequest {
-                    entries,
-                    queue_url: self.queue_url.clone()
-                }
-            ).with_timeout(Duration::from_secs(2)).compat()
-        });
+            let ack = (
+                self.sqs_client.delete_message_batch(
+                    DeleteMessageBatchRequest {
+                        entries,
+                        queue_url: self.queue_url.clone(),
+                    }
+                ).with_timeout(Duration::from_secs(2)).compat().await,
+                msg_ids
+            );
+
+            acks.push(ack);
+        };
 
         info!("Acking all messages");
-        let results = futures::future::join_all(acks).await;
-        for result in results {
-            if let Err(e) = result {
-                warn!("Failed to acknowledge event: {:?}", e);
+
+        for (result, msg_ids) in acks {
+            match result {
+                Ok(batch_result) => {
+                    for success in batch_result.successful {
+                        (self.on_ack)(self.self_actor.clone().unwrap(), Ok(success.id))
+                    }
+
+                    for failure in batch_result.failed {
+                        (self.on_ack)(self.self_actor.clone().unwrap(), Err(failure.id))
+                    }
+                }
+                Err(e) => {
+                    for msg_id in msg_ids {
+                        (self.on_ack)(self.self_actor.clone().unwrap(), Err(msg_id))
+                    }
+                    warn!("Failed to acknowledge event: {:?}", e);
+                }
             }
+//            (self.on_ack)(result, message_id);
         }
         info!("Acked");
 
@@ -157,20 +193,21 @@ where
 
 #[allow(non_camel_case_types)]
 pub enum SqsCompletionHandlerMessage<CE>
-where
-    CE: Send + Sync  + 'static,
+    where
+        CE: Send + Sync + Clone + 'static,
 {
     mark_complete { msg: SqsMessage, completed: CE },
     ack_all { notify: Option<tokio::sync::oneshot::Sender<()>> },
 }
 
-impl<CPE, CP, CE, Payload, EE> SqsCompletionHandler<CPE, CP, CE, Payload, EE>
-where
-    CPE: Debug + Send + Sync + 'static,
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
-    Payload: Send + Sync + 'static,
-    CE: Send + Sync  + 'static,
-    EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
+impl<CPE, CP, CE, Payload, EE, OA> SqsCompletionHandler<CPE, CP, CE, Payload, EE, OA>
+    where
+        CPE: Debug + Send + Sync + 'static,
+        CP: CompletionEventSerializer<CompletedEvent=CE, Output=Payload, Error=CPE> + Send + Sync + 'static,
+        Payload: Send + Sync + 'static,
+        CE: Send + Sync + Clone + 'static,
+        EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
+        OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
 {
     pub async fn route_message(&mut self, msg: SqsCompletionHandlerMessage<CE>) {
         match msg {
@@ -184,29 +221,32 @@ where
 
 #[derive(Clone)]
 pub struct SqsCompletionHandlerActor<CE>
-where
-    CE: Send + Sync  + 'static,
+    where
+        CE: Send + Sync + Clone + 'static,
 {
     sender: Sender<SqsCompletionHandlerMessage<CE>>,
 }
 
 impl<CE> SqsCompletionHandlerActor<CE>
-where
-    CE: Send + Sync  + 'static,
-{
-    pub fn new<CPE, CP, Payload, EE>(actor_impl: SqsCompletionHandler<CPE, CP, CE, Payload, EE>) -> Self
     where
-        CPE: Debug + Send + Sync + 'static,
-        CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE>
+        CE: Send + Sync + Clone + 'static,
+{
+    pub fn new<CPE, CP, Payload, EE, OA>(mut actor_impl: SqsCompletionHandler<CPE, CP, CE, Payload, EE, OA>) -> Self
+        where
+            CPE: Debug + Send + Sync + 'static,
+            CP: CompletionEventSerializer<CompletedEvent=CE, Output=Payload, Error=CPE>
             + Send
             + Sync
-            
+
             + 'static,
-        Payload: Send + Sync + 'static,
-        EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
+            Payload: Send + Sync + 'static,
+            EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
+            OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
     {
         let (sender, receiver) = channel(1);
 
+        let self_actor = Self { sender };
+        actor_impl.self_actor = Some(self_actor.clone());
         tokio::task::spawn(
             route_wrapper(
                 SqsCompletionHandlerRouter {
@@ -216,7 +256,7 @@ where
             )
         );
 
-        Self { sender }
+        self_actor
     }
 
     pub async fn mark_complete(&self, msg: SqsMessage, completed: CE) {
@@ -233,8 +273,6 @@ where
     }
 }
 
-use async_trait::async_trait;
-
 #[async_trait]
 pub trait CompletionHandler {
     type Message;
@@ -246,45 +284,47 @@ pub trait CompletionHandler {
 
 #[async_trait]
 impl<CE> CompletionHandler for SqsCompletionHandlerActor<CE>
-where
-    CE: Send + Sync  + 'static,
+    where
+        CE: Send + Sync + Clone + 'static,
 {
     type Message = SqsMessage;
     type CompletedEvent = CE;
 
     async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent) {
         SqsCompletionHandlerActor::mark_complete(
-            self, msg, completed_event
+            self, msg, completed_event,
         ).await
     }
 
     async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
         SqsCompletionHandlerActor::ack_all(
-            self, notify
+            self, notify,
         ).await
     }
 }
 
-pub struct SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE>
-where
-    CPE: Debug + Send + Sync + 'static,
-    CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
-    Payload: Send + Sync + 'static,
-    CE: Send + Sync  + 'static,
-    EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
+pub struct SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE, OA>
+    where
+        CPE: Debug + Send + Sync + 'static,
+        CP: CompletionEventSerializer<CompletedEvent=CE, Output=Payload, Error=CPE> + Send + Sync + 'static,
+        Payload: Send + Sync + 'static,
+        CE: Send + Sync + Clone + 'static,
+        EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
+        OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
 {
     receiver: Receiver<SqsCompletionHandlerMessage<CE>>,
-    actor_impl: SqsCompletionHandler<CPE, CP, CE, Payload, EE>,
+    actor_impl: SqsCompletionHandler<CPE, CP, CE, Payload, EE, OA>,
 }
 
 
-async fn route_wrapper<CPE, CP, CE, Payload, EE>(mut router: SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE>)
+async fn route_wrapper<CPE, CP, CE, Payload, EE, OA>(mut router: SqsCompletionHandlerRouter<CPE, CP, CE, Payload, EE, OA>)
     where
         CPE: Debug + Send + Sync + 'static,
-        CP: CompletionEventSerializer<CompletedEvent = CE, Output = Payload, Error=CPE> + Send + Sync  + 'static,
+        CP: CompletionEventSerializer<CompletedEvent=CE, Output=Payload, Error=CPE> + Send + Sync + 'static,
         Payload: Send + Sync + 'static,
-        CE: Send + Sync  + 'static,
-        EE: EventEmitter<Event = Payload> + Send + Sync  + 'static,
+        CE: Send + Sync + Clone + 'static,
+        EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
+        OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
 {
     while let Some(msg) = router.receiver.recv().await {
         router.actor_impl.route_message(msg).await;

@@ -1,35 +1,37 @@
-use std::error::Error;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use futures::compat::Future01CompatExt;
+use std::time::Duration;
 
+use futures::compat::Future01CompatExt;
+use lambda_runtime::Context;
 use log::{info, warn};
-use rusoto_sqs::{ReceiveMessageRequest, Sqs, ReceiveMessageResult, ReceiveMessageError};
+use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Sender};
+
 use async_trait::async_trait;
 
 use crate::event_processor::EventProcessorActor;
-use lambda_runtime::Context;
 use crate::sqs_completion_handler::CompletionHandler;
 
 pub struct ConsumePolicy {
     context: Context,
     stop_at: Duration,
     max_empty_receives: u8,
-    empty_receives: u8
+    empty_receives: u8,
 }
 
 impl ConsumePolicy {
     pub fn new(context: Context, stop_at: Duration, max_empty_receives: u8) -> Self {
         Self {
-            context, stop_at, max_empty_receives,
-            empty_receives: 0
+            context,
+            stop_at,
+            max_empty_receives,
+            empty_receives: 0,
         }
     }
 
     pub fn should_consume(&self) -> bool {
         (self.stop_at.as_millis() <= self.context.get_time_remaining_millis() as u128)
-        && self.empty_receives <= self.max_empty_receives
+            && self.empty_receives <= self.max_empty_receives
     }
 
     pub fn register_received(&mut self, any: bool) {
@@ -43,7 +45,7 @@ impl ConsumePolicy {
 
 pub struct SqsConsumer<S, CH>
     where
-        S: Sqs  + Send + Sync + 'static,
+        S: Sqs + Send + Sync + 'static,
         CH: CompletionHandler + Send + Sync + 'static
 {
     sqs_client: S,
@@ -52,11 +54,11 @@ pub struct SqsConsumer<S, CH>
     consume_policy: ConsumePolicy,
     completion_handler: CH,
     shutdown_subscriber: Option<tokio::sync::oneshot::Sender<()>>,
-    self_actor: Option<SqsConsumerActor>
+    self_actor: Option<SqsConsumerActor>,
 }
 
 impl<S, CH> SqsConsumer<S, CH>
-    where S: Sqs  + Send + Sync + 'static,
+    where S: Sqs + Send + Sync + 'static,
           CH: CompletionHandler + Send + Sync + 'static
 {
     pub fn new(
@@ -66,8 +68,8 @@ impl<S, CH> SqsConsumer<S, CH>
         completion_handler: CH,
         shutdown_subscriber: tokio::sync::oneshot::Sender<()>,
     ) -> SqsConsumer<S, CH>
-    where
-        S: Sqs,
+        where
+            S: Sqs,
     {
         Self {
             sqs_client,
@@ -82,7 +84,7 @@ impl<S, CH> SqsConsumer<S, CH>
 }
 
 impl<S, CH> SqsConsumer<S, CH>
-    where S: Sqs  + Send + Sync + 'static,
+    where S: Sqs + Send + Sync + 'static,
           CH: CompletionHandler + Send + Sync + 'static
 {
     pub async fn get_new_event(&mut self, event_processor: EventProcessorActor) {
@@ -95,7 +97,7 @@ impl<S, CH> SqsConsumer<S, CH>
                 Err(e) => {
                     warn!("Failed to get new events with: {:?}", e);
                     self.self_actor.clone().unwrap().get_next_event(event_processor).await;
-                    return
+                    return;
                 }
             };
 
@@ -120,9 +122,11 @@ impl<S, CH> SqsConsumer<S, CH>
             match shutdown_subscriber {
                 Some(shutdown_subscriber) => {
                     shutdown_subscriber.send(()).unwrap();
-                },
+                }
                 None => warn!("Attempted to shut down with empty shutdown_subscriber")
             };
+
+            event_processor.stop_processing().await;
         }
 
         if let Some(next_event) = self.stored_events.pop() {
@@ -160,7 +164,7 @@ pub enum SqsConsumerMessage {
 }
 
 impl<S, CH> SqsConsumer<S, CH>
-    where S: Sqs  + Send + Sync + 'static,
+    where S: Sqs + Send + Sync + 'static,
           CH: CompletionHandler + Send + Sync + 'static
 {
     async fn route_message(&mut self, msg: SqsConsumerMessage) {
@@ -179,12 +183,12 @@ pub struct SqsConsumerActor {
 
 impl SqsConsumerActor {
     pub fn new<S, CH>(mut actor_impl: SqsConsumer<S, CH>) -> Self
-        where S: Sqs  + Send + Sync + 'static,
+        where S: Sqs + Send + Sync + 'static,
               CH: CompletionHandler + Send + Sync + 'static
     {
         let (sender, receiver) = channel(1);
 
-        let self_actor = Self {sender};
+        let self_actor = Self { sender };
 
         actor_impl.self_actor = Some(self_actor.clone());
 
@@ -217,13 +221,13 @@ pub trait Consumer {
 impl Consumer for SqsConsumerActor {
     async fn get_next_event(&self, event_processor: EventProcessorActor) {
         SqsConsumerActor::get_next_event(
-            self, event_processor
+            self, event_processor,
         ).await
     }
 }
 
 pub struct SqsConsumerRouter<S, CH>
-    where S: Sqs  + Send + Sync + 'static,
+    where S: Sqs + Send + Sync + 'static,
           CH: CompletionHandler + Send + Sync + 'static
 {
     receiver: tokio::sync::mpsc::Receiver<SqsConsumerMessage>,
@@ -231,9 +235,8 @@ pub struct SqsConsumerRouter<S, CH>
 }
 
 
-
 async fn route_wrapper<S, CH>(mut router: SqsConsumerRouter<S, CH>)
-    where S: Sqs  + Send + Sync + 'static,
+    where S: Sqs + Send + Sync + 'static,
           CH: CompletionHandler + Send + Sync + 'static
 {
     while let Some(msg) = router.receiver.recv().await {

@@ -7,3 +7,5 @@ pub mod sqs_completion_handler;
 pub mod completion_event_serializer;
 pub mod sqs_consumer;
 pub mod retry;
+pub mod cache;
+pub mod redis_cache;

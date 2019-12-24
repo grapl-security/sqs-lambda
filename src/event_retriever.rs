@@ -73,3 +73,4 @@ impl<S, D, E> PayloadRetriever<E> for S3PayloadRetriever<S, D, E>
         self.decoder.decode(body)
     }
 }
+

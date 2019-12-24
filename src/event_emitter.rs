@@ -1,10 +1,11 @@
-use async_trait::async_trait;
-use rusoto_s3::{S3, PutObjectRequest};
-use futures::compat::Future01CompatExt;
 use std::error::Error;
 use std::time::Duration;
-use crate::retry::RetryHandler;
-use futures_retry::{RetryPolicy, FutureRetry, StreamRetryExt};
+
+use futures::compat::Future01CompatExt;
+use log::*;
+use rusoto_s3::{PutObjectRequest, S3};
+
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait EventEmitter {
@@ -33,7 +34,9 @@ impl<S, F> S3EventEmitter<S, F>
     {
         let output_bucket = output_bucket.into();
         Self {
-            s3, output_bucket, key_fn
+            s3,
+            output_bucket,
+            key_fn,
         }
     }
 }
@@ -42,14 +45,16 @@ impl<S, F> S3EventEmitter<S, F>
 impl<S, F> EventEmitter for S3EventEmitter<S, F>
     where
         S: S3 + Send + Sync + 'static,
-        F: Fn(&[u8]) -> String + Send,
+        F: Fn(&[u8]) -> String + Send + Sync,
 {
     type Event = Vec<u8>;
     type Error = Box<dyn Error>;
 
     async fn emit_event(&mut self, events: Vec<Self::Event>) -> Result<(), Self::Error> {
-        for event in events {
+        let event_uploads = events.into_iter().map(|event| {
             let key = (self.key_fn)(&event);
+
+            info!("Uploading: {} bytes to {}{}", event.len(), &self.output_bucket, &key);
 
             self.s3.put_object(
                 PutObjectRequest {
@@ -61,7 +66,12 @@ impl<S, F> EventEmitter for S3EventEmitter<S, F>
             )
                 .with_timeout(Duration::from_secs(2))
                 .compat()
-                .await?;
+        });
+
+        let event_uploads = futures::future::join_all(event_uploads).await;
+
+        for upload in event_uploads {
+            upload?;
         }
 
         Ok(())
