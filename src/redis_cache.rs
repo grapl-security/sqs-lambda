@@ -18,7 +18,7 @@ pub struct RedisCache {
 impl RedisCache {
     pub async fn new(address: String) -> Result<Self, RedisError> {
         let connection_pool = ConnectionPool::create(
-            "127.0.0.1:6379".into(),
+            &address,
             None,
             num_cpus::get()
         ).await?;
