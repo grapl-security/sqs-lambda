@@ -32,8 +32,8 @@ impl RedisCache {
 }
 
 #[async_trait]
-impl Cache<RedisError> for RedisCache {
-    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, RedisError>
+impl Cache<Box<dyn std::error::Error>> for RedisCache {
+    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, Box<dyn std::error::Error>>
         where
             CA: Cacheable + Send + Sync + 'static
     {
@@ -65,13 +65,20 @@ impl Cache<RedisError> for RedisCache {
         }
     }
 
-    async fn store(&mut self, identity: Vec<u8>) -> Result<(), RedisError>
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), Box<dyn std::error::Error>>
     {
         let identity = hex::encode(identity);
 
         let mut client = self.connection_pool.get().await;
 
-        client.set(&identity, b"1").await?;
+        let res = tokio::time::timeout(
+            Duration::from_millis(200),
+            client.set(&identity, b"1")
+        ).await;
+
+        res??;
+
+
 
         Ok(())
     }
