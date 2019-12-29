@@ -50,3 +50,16 @@ impl<C, E> ReadableCache<E> for C
         Cache::get(self, cacheable).await
     }
 }
+
+pub struct NopCache {}
+
+
+#[async_trait]
+impl Cache<()> for NopCache {
+    async fn get<CA: Cacheable + Send + Sync + 'static>(&mut self, cacheable: CA) -> Result<CacheResponse, ()> {
+        Ok(CacheResponse::Miss)
+    }
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), ()> {
+        Ok(())
+    }
+}
