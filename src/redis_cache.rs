@@ -6,6 +6,7 @@ use darkredis::Error as RedisError;
 use async_trait::async_trait;
 
 use crate::cache::{Cache, Cacheable, CacheResponse};
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct RedisCache {
@@ -41,7 +42,18 @@ impl Cache<RedisError> for RedisCache {
 //
         let mut client = self.connection_pool.get().await;
 
-        let res = client.exists(&identity).await;
+        let res = tokio::time::timeout(
+            Duration::from_millis(200),
+            client.exists(&identity)
+        ).await;
+
+        let res = match res {
+            Ok(res) => res,
+            Err(e) => {
+                warn!("Cache lookup failed with: {:?}", e);
+                return Ok(CacheResponse::Miss)
+            }
+        };
 
         match res {
             Ok(true) => Ok(CacheResponse::Hit),
