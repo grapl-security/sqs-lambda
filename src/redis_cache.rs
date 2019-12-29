@@ -32,8 +32,8 @@ impl RedisCache {
 }
 
 #[async_trait]
-impl Cache<Box<dyn std::error::Error>> for RedisCache {
-    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, Box<dyn std::error::Error>>
+impl Cache<Box<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
+    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, Box<dyn std::error::Error + Send + Sync + 'static>>
         where
             CA: Cacheable + Send + Sync + 'static
     {
@@ -65,7 +65,7 @@ impl Cache<Box<dyn std::error::Error>> for RedisCache {
         }
     }
 
-    async fn store(&mut self, identity: Vec<u8>) -> Result<(), Box<dyn std::error::Error>>
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
     {
         let identity = hex::encode(identity);
 
