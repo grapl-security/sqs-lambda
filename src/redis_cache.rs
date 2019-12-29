@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 use crate::cache::{Cache, Cacheable, CacheResponse};
 use std::time::Duration;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct RedisCache {
@@ -32,8 +33,8 @@ impl RedisCache {
 }
 
 #[async_trait]
-impl Cache<Box<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
-    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, Box<dyn std::error::Error + Send + Sync + 'static>>
+impl Cache<Arc<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
+    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, Arc<dyn std::error::Error + Send + Sync + 'static>>
         where
             CA: Cacheable + Send + Sync + 'static
     {
@@ -65,7 +66,7 @@ impl Cache<Box<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
         }
     }
 
-    async fn store(&mut self, identity: Vec<u8>) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), Arc<dyn std::error::Error + Send + Sync + 'static>>
     {
         let identity = hex::encode(identity);
 
@@ -76,7 +77,9 @@ impl Cache<Box<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
             client.set(&identity, b"1")
         ).await;
 
-        res??;
+        res
+            .map_err(|err| Arc::new(err) as Arc<dyn std::error::Error + Send + Sync + 'static>)?
+            .map_err(|err| Arc::new(err) as Arc<dyn std::error::Error + Send + Sync + 'static>)?;
 
 
 
