@@ -77,8 +77,8 @@ impl<CPE, CP, CE, Payload, EE, OA> SqsCompletionHandler<CPE, CP, CE, Payload, EE
         Self {
             sqs_client,
             queue_url,
-            completed_events: Vec::with_capacity(10),
-            completed_messages: Vec::with_capacity(10),
+            completed_events: Vec::with_capacity(completion_policy.max_messages as usize),
+            completed_messages: Vec::with_capacity(completion_policy.max_messages as usize),
             completion_serializer,
             event_emitter,
             completion_policy,
@@ -97,9 +97,17 @@ impl<CPE, CP, CE, Payload, EE, OA> SqsCompletionHandler<CPE, CP, CE, Payload, EE
         EE: EventEmitter<Event=Payload> + Send + Sync + 'static,
         OA: Fn(SqsCompletionHandlerActor<CE>, Result<String, String>) + Send + Sync + 'static,
 {
-    pub async fn mark_complete(&mut self, sqs_message: SqsMessage, completed: CE) {
+    pub async fn mark_complete(&mut self, sqs_message: SqsMessage, completed: CE, success: bool) {
         self.completed_events.push(completed);
-        self.completed_messages.push(sqs_message);
+        if success {
+            self.completed_messages.push(sqs_message);
+        }
+
+        info!(
+            "Marked event complete. {} completed events, {} completed messages",
+            self.completed_events.len(),
+            self.completed_messages.len(),
+        );
 
         if self.completion_policy.should_flush(self.completed_events.len() as u16) {
             self.ack_all(None).await;
@@ -117,12 +125,10 @@ impl<CPE, CP, CE, Payload, EE, OA> SqsCompletionHandler<CPE, CP, CE, Payload, EE
             Ok(serialized_event) => serialized_event,
             Err(e) => {
                 // We should emit a failure, but ultimately we just have to not ack these messages
-                warn!("Serializing events failed: {:?}", e);
-
                 self.completed_events.clear();
                 self.completed_messages.clear();
 
-                return;
+                panic!("Serializing events failed: {:?}", e);
             }
         };
 
@@ -196,7 +202,7 @@ pub enum SqsCompletionHandlerMessage<CE>
     where
         CE: Send + Sync + Clone + 'static,
 {
-    mark_complete { msg: SqsMessage, completed: CE },
+    mark_complete { msg: SqsMessage, completed: CE , success: bool },
     ack_all { notify: Option<tokio::sync::oneshot::Sender<()>> },
 }
 
@@ -211,8 +217,8 @@ impl<CPE, CP, CE, Payload, EE, OA> SqsCompletionHandler<CPE, CP, CE, Payload, EE
 {
     pub async fn route_message(&mut self, msg: SqsCompletionHandlerMessage<CE>) {
         match msg {
-            SqsCompletionHandlerMessage::mark_complete { msg, completed } => {
-                self.mark_complete(msg, completed).await
+            SqsCompletionHandlerMessage::mark_complete { msg, completed, success } => {
+                self.mark_complete(msg, completed, success).await
             }
             SqsCompletionHandlerMessage::ack_all { notify } => self.ack_all(notify).await,
         };
@@ -259,8 +265,8 @@ impl<CE> SqsCompletionHandlerActor<CE>
         self_actor
     }
 
-    pub async fn mark_complete(&self, msg: SqsMessage, completed: CE) {
-        let msg = SqsCompletionHandlerMessage::mark_complete { msg, completed };
+    pub async fn mark_complete(&self, msg: SqsMessage, completed: CE, success: bool) {
+        let msg = SqsCompletionHandlerMessage::mark_complete { msg, completed, success };
         if let Err(_e) = self.sender.clone().send(msg).await {
             panic!("Receiver has failed, propagating error. mark_complete")
         }
@@ -278,7 +284,7 @@ pub trait CompletionHandler {
     type Message;
     type CompletedEvent;
 
-    async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent);
+    async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent, success: bool);
     async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>);
 }
 
@@ -290,9 +296,9 @@ impl<CE> CompletionHandler for SqsCompletionHandlerActor<CE>
     type Message = SqsMessage;
     type CompletedEvent = CE;
 
-    async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent) {
+    async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent, success: bool) {
         SqsCompletionHandlerActor::mark_complete(
-            self, msg, completed_event,
+            self, msg, completed_event, success
         ).await
     }
 

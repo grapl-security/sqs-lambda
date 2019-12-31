@@ -100,9 +100,10 @@ where
         match output_event.completed_event {
             Completion::Total(completed) => {
                 info!("Marking all events complete - total success");
-                self.completion_handler.mark_complete(event, completed).await;
+                self.completion_handler.mark_complete(event, completed, true).await;
             },
-            Completion::Partial((_completed, err)) => {
+            Completion::Partial((completed, err)) => {
+                self.completion_handler.mark_complete(event, completed, false).await;
                 warn!("EventHandler was only partially successful: {:?}", err);
             },
             Completion::Error(e) => {
@@ -115,11 +116,14 @@ where
 
         info!("Caching");
 
-        for identity in output_event.identities {
-            if let Err(e) = self.cache.store(identity).await {
-                warn!("Failed to cache with: {:?}", e);
-            }
-        }
+        // We can't cache here, what if mark_complete failed?
+        // The completion handler should just take the OutputEvent directly, and it should have a reference
+        // to the cache
+//        for identity in output_event.identities {
+//            if let Err(e) = self.cache.store(identity).await {
+//                warn!("Failed to cache with: {:?}", e);
+//            }
+//        }
 
         if let ProcessorState::Started = self.state {
             self.consumer
