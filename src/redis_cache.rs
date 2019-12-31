@@ -1,6 +1,7 @@
 use log::warn;
 use futures::compat::Future01CompatExt;
 use darkredis::ConnectionPool;
+use darkredis::Connection;
 use darkredis::Error as RedisError;
 
 use async_trait::async_trait;
@@ -74,7 +75,7 @@ impl Cache<Arc<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
 
         let res = tokio::time::timeout(
             Duration::from_millis(200),
-            client.set(&identity, b"1")
+            client.set_and_expire_seconds(&identity, b"1", 16 * 60)
         ).await;
 
         res
