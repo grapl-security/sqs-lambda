@@ -9,6 +9,8 @@ use std::error::Error;
 use std::io::Cursor;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use std::sync::Arc;
+
 use prost::Message;
 use rusoto_s3::S3Client;
 use rusoto_sqs::SqsClient;
@@ -28,7 +30,7 @@ use sqs_lambda::sqs_completion_handler;
 use sqs_lambda::sqs_consumer;
 use sqs_lambda::redis_cache::RedisCache;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct MyService {
     cache: RedisCache,
 }
@@ -174,7 +176,7 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
-        let cache = RedisCache::new("address".to_owned()).expect("Could not create redis client");
+        let cache = RedisCache::new("address".to_owned()).await.expect("Could not create redis client");
 
 
         let consume_policy = ConsumePolicy::new(
@@ -200,7 +202,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     1000, // Buffer up to 1000 messages
                     Duration::from_secs(30), // Buffer for up to 30 seconds
                 ),
-                |_, _| {}
+                |_, _| {},
+                cache.clone()
             )
         );
 
@@ -223,15 +226,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     sqs_completion_handler.clone(),
                     MyService { cache: cache.clone() },
                     S3PayloadRetriever::new(init_s3_client(), ZstdJsonDecoder::default()),
-                    cache.clone()
                 ))
             })
             .collect();
-
-        futures::future::join_all(event_processors.iter().map(|ep| ep.start_processing())).await;
-
-        // Wait for the consumers to shutdown
-        let _ = shutdown_notify.await;
+//
+//        futures::future::join_all(event_processors.iter().map(|ep| ep.start_processing())).await;
+//
+//        // Wait for the consumers to shutdown
+//        let _ = shutdown_notify.await;
 
         tokio::time::delay_for(Duration::from_millis(100)).await;
     });

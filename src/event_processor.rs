@@ -7,7 +7,7 @@ use crate::event_retriever::PayloadRetriever;
 use crate::sqs_completion_handler::CompletionHandler;
 use crate::sqs_consumer::Consumer;
 use std::fmt::Debug;
-use crate::cache::Cache;
+
 use std::marker::PhantomData;
 
 #[derive(Copy, Clone, Debug)]
@@ -18,44 +18,38 @@ pub enum ProcessorState {
 }
 
 #[derive(Clone)]
-pub struct EventProcessor<C, EH, Input, Output, ER, CH, CacheT, E>
+pub struct EventProcessor<C, EH, Input, Output, ER, CH>
 where
     C: Consumer + Clone + Send + Sync + 'static,
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
     ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
-    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
-    CacheT: Cache<E> + Send + Sync + Clone + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=OutputEvent<Output, <EH as EventHandler>::Error>> + Send + Sync + Clone + 'static,
 {
     consumer: C,
     completion_handler: CH,
     event_retriever: ER,
     event_handler: EH,
     state: ProcessorState,
-    cache: CacheT,
     self_actor: Option<EventProcessorActor>,
-    _p: PhantomData<E>
 }
 
-impl<C, EH, Input, Output, ER, CH, CacheT, E> EventProcessor<C, EH, Input, Output, ER, CH, CacheT, E>
+impl<C, EH, Input, Output, ER, CH> EventProcessor<C, EH, Input, Output, ER, CH>
 where
     C: Consumer + Clone + Send + Sync + 'static,
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
     ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
-    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
-    CacheT: Cache<E> + Send + Sync + Clone + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=OutputEvent<Output, <EH as EventHandler>::Error>> + Send + Sync + Clone + 'static,
+    
 {
     pub fn new(
         consumer: C,
         completion_handler: CH,
         event_handler: EH,
         event_retriever: ER,
-        cache: CacheT,
     ) -> Self {
         Self {
             consumer,
@@ -63,23 +57,21 @@ where
             event_handler,
             event_retriever,
             state: ProcessorState::Waiting,
-            cache,
             self_actor: None,
-            _p: PhantomData,
+
         }
     }
 }
 
-impl<C, EH, Input, Output, ER, CH, CacheT, E> EventProcessor<C, EH, Input, Output, ER, CH, CacheT, E>
+impl<C, EH, Input, Output, ER, CH> EventProcessor<C, EH, Input, Output, ER, CH>
 where
     C: Consumer + Clone + Send + Sync + 'static,
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
     ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
-    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
-    CacheT: Cache<E> + Send + Sync + Clone + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=OutputEvent<Output, <EH as EventHandler>::Error>> + Send + Sync + Clone + 'static,
+    
 {
     pub async fn process_event(&mut self, event: SqsMessage) {
         // TODO: Handle errors
@@ -97,33 +89,7 @@ where
         info!("Handling event");
         let output_event = self.event_handler.handle_event(retrieved_event).await;
 
-        match output_event.completed_event {
-            Completion::Total(completed) => {
-                info!("Marking all events complete - total success");
-                self.completion_handler.mark_complete(event, completed, true).await;
-            },
-            Completion::Partial((completed, err)) => {
-                self.completion_handler.mark_complete(event, completed, false).await;
-                warn!("EventHandler was only partially successful: {:?}", err);
-            },
-            Completion::Error(e) => {
-                info!("Event handler failed: {:?}", e);
-                return
-                // TODO: Retry
-                // TODO: We could reset the message visibility to 0 so it gets picked up again?
-            }
-        };
-
-        info!("Caching");
-
-        // We can't cache here, what if mark_complete failed?
-        // The completion handler should just take the OutputEvent directly, and it should have a reference
-        // to the cache
-//        for identity in output_event.identities {
-//            if let Err(e) = self.cache.store(identity).await {
-//                warn!("Failed to cache with: {:?}", e);
-//            }
-//        }
+        self.completion_handler.mark_complete(event, output_event).await;
 
         if let ProcessorState::Started = self.state {
             self.consumer
@@ -151,16 +117,16 @@ pub enum EventProcessorMessage {
     stop_processing {},
 }
 
-impl<C, EH, Input, Output, ER, CH, CacheT, E> EventProcessor<C, EH, Input, Output, ER, CH, CacheT, E>
+impl<C, EH, Input, Output, ER, CH> EventProcessor<C, EH, Input, Output, ER, CH>
 where
     C: Consumer + Clone + Send + Sync + 'static,
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
     ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
-    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
-    CacheT: Cache<E> + Send + Sync + Clone + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=OutputEvent<Output, <EH as EventHandler>::Error>> + Send + Sync + Clone + 'static,
+
+    
 {
     pub async fn route_message(&mut self, msg: EventProcessorMessage) {
         match msg {
@@ -177,16 +143,16 @@ pub struct EventProcessorActor {
 }
 
 impl EventProcessorActor {
-    pub fn new<C, EH, Input, Output, ER, CH, CacheT, E>(mut actor_impl: EventProcessor<C, EH, Input, Output, ER, CH, CacheT, E>) -> Self
+    pub fn new<C, EH, Input, Output, ER, CH>(mut actor_impl: EventProcessor<C, EH, Input, Output, ER, CH>) -> Self
     where
         C: Consumer + Clone + Send + Sync + 'static,
         EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
         Input: Send + Clone + 'static,
         Output: Send + Sync + Clone + 'static,
         ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
-        CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
-        CacheT: Cache<E> + Send + Sync + Clone + 'static,
-        E: Debug + Clone + Send + Sync + 'static,
+        CH: CompletionHandler<Message=SqsMessage, CompletedEvent=OutputEvent<Output, <EH as EventHandler>::Error>> + Send + Sync + Clone + 'static,
+
+        
     {
         let (sender, receiver) = channel(1);
 
@@ -227,32 +193,32 @@ impl EventProcessorActor {
     }
 }
 
-pub struct EventProcessorRouter<C, EH, Input, Output, ER, CH, CacheT, E>
+pub struct EventProcessorRouter<C, EH, Input, Output, ER, CH>
 where
     C: Consumer + Clone + Send + Sync + 'static,
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
     ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
-    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
-    CacheT: Cache<E> + Send + Sync + Clone + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=OutputEvent<Output, <EH as EventHandler>::Error>> + Send + Sync + Clone + 'static,
+
+    
 {
     receiver: Receiver<EventProcessorMessage>,
-    actor_impl: EventProcessor<C, EH, Input, Output, ER, CH, CacheT, E>,
+    actor_impl: EventProcessor<C, EH, Input, Output, ER, CH>,
 }
 
 
-async fn route_wrapper<C, EH, Input, Output, ER, CH, CacheT, E>(mut router: EventProcessorRouter<C, EH, Input, Output, ER, CH, CacheT, E>)
+async fn route_wrapper<C, EH, Input, Output, ER, CH>(mut router: EventProcessorRouter<C, EH, Input, Output, ER, CH>)
 where
     C: Consumer + Clone + Send + Sync + 'static,
     EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
     Input: Send + Clone + 'static,
     Output: Send + Sync + Clone + 'static,
     ER: PayloadRetriever<Input> + Send + Sync + Clone + 'static,
-    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=Output> + Send + Sync + Clone + 'static,
-    CacheT: Cache<E> + Send + Sync + Clone + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    CH: CompletionHandler<Message=SqsMessage, CompletedEvent=OutputEvent<Output, <EH as EventHandler>::Error>> + Send + Sync + Clone + 'static,
+    
+    
 {
     while let Some(msg) = router.receiver.recv().await {
         router.actor_impl.route_message(msg).await;

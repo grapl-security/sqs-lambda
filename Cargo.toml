@@ -1,6 +1,6 @@
 [package]
 name = "sqs-lambda"
-version = "0.2.9"
+version = "0.2.11"
 authors = ["Insanitybit <insanitybit@gmail.com>"]
 edition = "2018"
 description = 'SQS Service helper library'
