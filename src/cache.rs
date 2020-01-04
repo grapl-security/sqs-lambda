@@ -51,6 +51,7 @@ impl<C, E> ReadableCache<E> for C
     }
 }
 
+#[derive(Clone)]
 pub struct NopCache {}
 
 
