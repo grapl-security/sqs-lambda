@@ -1,14 +1,15 @@
-use log::warn;
-use futures::compat::Future01CompatExt;
-use darkredis::ConnectionPool;
+use std::fmt::Debug;
+use std::time::Duration;
+
 use darkredis::Connection;
+use darkredis::ConnectionPool;
 use darkredis::Error as RedisError;
+use futures::compat::Future01CompatExt;
+use log::warn;
 
 use async_trait::async_trait;
 
 use crate::cache::{Cache, Cacheable, CacheResponse};
-use std::time::Duration;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct RedisCache {
@@ -21,7 +22,7 @@ impl RedisCache {
         let connection_pool = ConnectionPool::create(
             address.clone(),
             None,
-            num_cpus::get()
+            num_cpus::get(),
         ).await?;
 
         Ok(
@@ -34,10 +35,13 @@ impl RedisCache {
 }
 
 #[async_trait]
-impl Cache<Arc<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
-    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, Arc<dyn std::error::Error + Send + Sync + 'static>>
+impl<E> Cache<E> for RedisCache
+    where
+        E: Debug + Clone + Send + Sync + 'static,
+{
+    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>
         where
-            CA: Cacheable + Send + Sync + 'static
+            CA: Cacheable + Send + Sync + 'static,
     {
         let identity = cacheable.identity();
         let identity = hex::encode(identity);
@@ -46,14 +50,14 @@ impl Cache<Arc<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
 
         let res = tokio::time::timeout(
             Duration::from_millis(200),
-            client.exists(&identity)
+            client.exists(&identity),
         ).await;
 
         let res = match res {
             Ok(res) => res,
             Err(e) => {
                 warn!("Cache lookup failed with: {:?}", e);
-                return Ok(CacheResponse::Miss)
+                return Ok(CacheResponse::Miss);
             }
         };
 
@@ -67,7 +71,7 @@ impl Cache<Arc<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
         }
     }
 
-    async fn store(&mut self, identity: Vec<u8>) -> Result<(), Arc<dyn std::error::Error + Send + Sync + 'static>>
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), crate::error::Error<E>>
     {
         let identity = hex::encode(identity);
 
@@ -75,13 +79,12 @@ impl Cache<Arc<dyn std::error::Error + Send + Sync + 'static>> for RedisCache {
 
         let res = tokio::time::timeout(
             Duration::from_millis(200),
-            client.set_and_expire_seconds(&identity, b"1", 16 * 60)
+            client.set_and_expire_seconds(&identity, b"1", 16 * 60),
         ).await;
 
         res
-            .map_err(|err| Arc::new(err) as Arc<dyn std::error::Error + Send + Sync + 'static>)?
-            .map_err(|err| Arc::new(err) as Arc<dyn std::error::Error + Send + Sync + 'static>)?;
-
+            .map_err(|err| crate::error::Error::CacheError(format!("{}", err)))?
+            .map_err(|err| crate::error::Error::CacheError(format!("{}", err)))?;
 
 
         Ok(())

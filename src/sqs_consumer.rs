@@ -7,20 +7,23 @@ use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Sender};
 
+use crate::consumer::Consumer;
 use async_trait::async_trait;
 
 use crate::event_processor::EventProcessorActor;
-use crate::sqs_completion_handler::CompletionHandler;
+use crate::completion_handler::CompletionHandler;
+use aktors::actor::Actor;
+use std::marker::PhantomData;
 
 pub struct ConsumePolicy {
     context: Context,
     stop_at: Duration,
-    max_empty_receives: u8,
-    empty_receives: u8,
+    max_empty_receives: u16,
+    empty_receives: u16,
 }
 
 impl ConsumePolicy {
-    pub fn new(context: Context, stop_at: Duration, max_empty_receives: u8) -> Self {
+    pub fn new(context: Context, stop_at: Duration, max_empty_receives: u16) -> Self {
         Self {
             context,
             stop_at,
@@ -46,7 +49,7 @@ impl ConsumePolicy {
 pub struct SqsConsumer<S, CH>
     where
         S: Sqs + Send + Sync + 'static,
-        CH: CompletionHandler + Send + Sync + 'static
+        CH: CompletionHandler + Clone + Send + Sync + 'static
 {
     sqs_client: S,
     queue_url: String,
@@ -54,12 +57,12 @@ pub struct SqsConsumer<S, CH>
     consume_policy: ConsumePolicy,
     completion_handler: CH,
     shutdown_subscriber: Option<tokio::sync::oneshot::Sender<()>>,
-    self_actor: Option<SqsConsumerActor>,
+    self_actor: Option<SqsConsumerActor<S, CH>>,
 }
 
 impl<S, CH> SqsConsumer<S, CH>
     where S: Sqs + Send + Sync + 'static,
-          CH: CompletionHandler + Send + Sync + 'static
+          CH: CompletionHandler + Clone + Send + Sync + 'static
 {
     pub fn new(
         sqs_client: S,
@@ -82,12 +85,41 @@ impl<S, CH> SqsConsumer<S, CH>
         }
     }
 }
-
-impl<S, CH> SqsConsumer<S, CH>
-    where S: Sqs + Send + Sync + 'static,
-          CH: CompletionHandler + Send + Sync + 'static
+impl<
+    S: Sqs + Send + Sync + 'static,
+    CH: CompletionHandler + Clone + Send + Sync + 'static
+> SqsConsumer<S, CH>
 {
-    pub async fn get_new_event(&mut self, event_processor: EventProcessorActor) {
+    pub async fn batch_get_events(&self, wait_time_seconds: i64) -> Result<Vec<SqsMessage>, rusoto_core::RusotoError<ReceiveMessageError>> {
+        info!("Calling receive_message");
+        let recv = self.sqs_client.receive_message(
+            ReceiveMessageRequest {
+                max_number_of_messages: Some(10),
+                queue_url: self.queue_url.clone(),
+                wait_time_seconds: Some(wait_time_seconds),
+                ..Default::default()
+            }
+        );
+
+        let recv = tokio::time::timeout(
+            Duration::from_secs(wait_time_seconds as u64 + 2),
+            recv
+        )
+            .await
+            .expect("batch_get_events timed out")?;
+        info!("Called receive_message : {:?}", recv);
+
+        Ok(recv.messages.unwrap_or(vec![]))
+    }
+}
+
+#[derive_aktor::derive_actor]
+impl<
+    S: Sqs + Send + Sync + 'static,
+    CH: CompletionHandler + Clone + Send + Sync + 'static
+> SqsConsumer<S, CH>
+{
+    pub async fn get_new_event(&mut self, event_processor: EventProcessorActor<SqsMessage>) {
         info!("New event request");
         let should_consume = self.consume_policy.should_consume();
 
@@ -126,7 +158,10 @@ impl<S, CH> SqsConsumer<S, CH>
                 None => warn!("Attempted to shut down with empty shutdown_subscriber")
             };
 
-            event_processor.stop_processing().await;
+            event_processor.release().await;
+            self.completion_handler.clone().release().await;
+            self.self_actor.clone().unwrap().release().await;
+            return
         }
 
         if let Some(next_event) = self.stored_events.pop() {
@@ -135,111 +170,38 @@ impl<S, CH> SqsConsumer<S, CH>
             info!("Sent next event to processor");
         } else {
             info!("No events to send to processor");
+            self.self_actor.clone().unwrap().get_next_event(event_processor).await;
         }
     }
 
-    pub async fn batch_get_events(&self, wait_time_seconds: i64) -> Result<Vec<SqsMessage>, rusoto_core::RusotoError<ReceiveMessageError>> {
-        info!("Calling receive_message");
-        let recv = self.sqs_client.receive_message(
-            ReceiveMessageRequest {
-                max_number_of_messages: Some(10),
-                queue_url: self.queue_url.clone(),
-                wait_time_seconds: Some(wait_time_seconds),
-                ..Default::default()
-            }
-        ).with_timeout(Duration::from_secs(wait_time_seconds as u64 + 2)).compat().await?;
+    pub async fn _p(&self, __p: PhantomData<(S, CH)>) {}
 
-        info!("Called receive_message : {:?}", recv);
-
-
-        Ok(recv.messages.unwrap_or(vec![]))
-    }
 }
 
-#[allow(non_camel_case_types)]
-pub enum SqsConsumerMessage {
-    get_new_event {
-        event_processor: EventProcessorActor,
-    },
-}
 
-impl<S, CH> SqsConsumer<S, CH>
-    where S: Sqs + Send + Sync + 'static,
-          CH: CompletionHandler + Send + Sync + 'static
+#[async_trait]
+impl<S, CH> Consumer<SqsMessage> for SqsConsumerActor<S, CH>
+    where
+        S: Sqs + Send + Sync + 'static,
+        CH: CompletionHandler + Clone + Send + Sync + 'static
 {
-    async fn route_message(&mut self, msg: SqsConsumerMessage) {
-        match msg {
-            SqsConsumerMessage::get_new_event { event_processor } => {
-                self.get_new_event(event_processor).await
-            }
-        };
-    }
-}
-
-#[derive(Clone)]
-pub struct SqsConsumerActor {
-    sender: Sender<SqsConsumerMessage>,
-}
-
-impl SqsConsumerActor {
-    pub fn new<S, CH>(mut actor_impl: SqsConsumer<S, CH>) -> Self
-        where S: Sqs + Send + Sync + 'static,
-              CH: CompletionHandler + Send + Sync + 'static
-    {
-        let (sender, receiver) = channel(1);
-
-        let self_actor = Self { sender };
-
-        actor_impl.self_actor = Some(self_actor.clone());
-
-        tokio::task::spawn(
-            route_wrapper(
-                SqsConsumerRouter {
-                    receiver,
-                    actor_impl,
-                }
-            )
-        );
-
-        self_actor
-    }
-
-    pub async fn get_next_event(&self, event_processor: EventProcessorActor) {
+    async fn get_next_event(&self, event_processor: EventProcessorActor<SqsMessage>) {
         let msg = SqsConsumerMessage::get_new_event { event_processor };
-        if let Err(_e) = self.sender.clone().send(msg).await {
-            panic!("Receiver has failed, propagating error. get_new_event")
-        }
-    }
-}
+        self.queue_len.clone().fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-#[async_trait]
-pub trait Consumer {
-    async fn get_next_event(&self, event_processor: EventProcessorActor);
-}
-
-#[async_trait]
-impl Consumer for SqsConsumerActor {
-    async fn get_next_event(&self, event_processor: EventProcessorActor) {
-        SqsConsumerActor::get_next_event(
-            self, event_processor,
-        ).await
-    }
-}
-
-pub struct SqsConsumerRouter<S, CH>
-    where S: Sqs + Send + Sync + 'static,
-          CH: CompletionHandler + Send + Sync + 'static
-{
-    receiver: tokio::sync::mpsc::Receiver<SqsConsumerMessage>,
-    actor_impl: SqsConsumer<S, CH>,
-}
-
-
-async fn route_wrapper<S, CH>(mut router: SqsConsumerRouter<S, CH>)
-    where S: Sqs + Send + Sync + 'static,
-          CH: CompletionHandler + Send + Sync + 'static
-{
-    while let Some(msg) = router.receiver.recv().await {
-        router.actor_impl.route_message(msg).await;
+        let mut sender = self.sender.clone();
+        tokio::task::spawn(
+            async move {
+                if let Err(e) = sender.send(msg).await {
+                    panic!(
+                        concat!(
+                            "Receiver has failed with {}, propagating error. ",
+                            "SqsConsumerActor.get_next_event"
+                        ),
+                        e
+                    )
+                }
+            }
+        );
     }
 }

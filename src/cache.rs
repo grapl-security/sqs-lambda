@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use async_trait::async_trait;
+use std::fmt::Debug;
 
 pub trait Cacheable {
     fn identity(&self) -> Vec<u8>;
@@ -26,24 +27,32 @@ pub enum CacheResponse {
 }
 
 #[async_trait]
-pub trait Cache<E> {
-    async fn get<CA: Cacheable + Send + Sync + 'static>(&mut self, cacheable: CA) -> Result<CacheResponse, E>;
-    async fn store(&mut self, identity: Vec<u8>) -> Result<(), E>;
+pub trait Cache<E>
+    where
+        E: Debug + Clone + Send + Sync + 'static,
+{
+    async fn get<CA: Cacheable + Send + Sync + 'static>
+            (&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>;
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), crate::error::Error<E>>;
 }
 
 #[async_trait]
-pub trait ReadableCache<E> {
-    async fn get<CA: Cacheable + Send + Sync + 'static>(&mut self, cacheable: CA) -> Result<CacheResponse, E>;
+pub trait ReadableCache<E>
+    where
+        E: Debug + Clone + Send + Sync + 'static,
+{
+    async fn get<CA: Cacheable + Send + Sync + 'static>(&mut self, cacheable: CA)
+        -> Result<CacheResponse, crate::error::Error<E>>;
 }
 
 #[async_trait]
 impl<C, E> ReadableCache<E> for C
     where
         C: Cache<E> + Send + Sync + 'static,
-        E: Send + Sync + 'static,
+        E: Debug + Clone + Send + Sync + 'static,
 {
 
-    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, E>
+    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>
         where
             CA: Cacheable + Send + Sync + 'static
     {
@@ -56,11 +65,16 @@ pub struct NopCache {}
 
 
 #[async_trait]
-impl Cache<()> for NopCache {
-    async fn get<CA: Cacheable + Send + Sync + 'static>(&mut self, _cacheable: CA) -> Result<CacheResponse, ()> {
+impl<E> Cache<E> for NopCache
+    where
+        E: Debug + Clone + Send + Sync + 'static,
+{
+    async fn get<CA: Cacheable + Send + Sync + 'static,>(&mut self, _cacheable: CA)
+        -> Result<CacheResponse, crate::error::Error<E>>
+    {
         Ok(CacheResponse::Miss)
     }
-    async fn store(&mut self, _identity: Vec<u8>) -> Result<(), ()> {
+    async fn store(&mut self, _identity: Vec<u8>) -> Result<(), crate::error::Error<E>> {
         Ok(())
     }
 }
