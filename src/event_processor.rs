@@ -77,9 +77,10 @@ impl<M, C, EH, Input, Output, ER, CH> EventProcessor<M, C, EH, Input, Output, ER
 {
     pub async fn process_event(&mut self, event: M) {
         // TODO: Handle errors
-        info!("Retrieved event");
+        info!("Processing event");
         let retrieved_event = match self.event_retriever.retrieve_event(&event).await {
             Ok(retrieved_event) => {
+                info!("Retrieved event");
                 Some(retrieved_event)
             },
             Err(e) => {
@@ -91,7 +92,7 @@ impl<M, C, EH, Input, Output, ER, CH> EventProcessor<M, C, EH, Input, Output, ER
         };
 
         if let Some(retrieved_event) = retrieved_event {
-            info!("Handling event");
+            info!("Handling retrieved event");
             let output_event = self.event_handler.handle_event(retrieved_event).await;
             self.completion_handler.mark_complete(event, output_event).await;
         }

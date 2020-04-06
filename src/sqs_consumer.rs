@@ -158,6 +158,7 @@ impl<
                 None => warn!("Attempted to shut down with empty shutdown_subscriber")
             };
 
+            event_processor.stop_processing().await;
             event_processor.release().await;
             self.completion_handler.clone().release().await;
             self.self_actor.clone().unwrap().release().await;
