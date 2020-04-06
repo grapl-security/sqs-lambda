@@ -49,6 +49,7 @@ pub async fn sqs_service<
     OnEmission,
 >(
     queue_url: impl Into<String>,
+    initial_messages: impl IntoIterator<Item=rusoto_sqs::Message>,
     dest_bucket: impl Into<String>,
     ctx: lambda_runtime::Context,
     s3_client: S3T,
@@ -127,7 +128,14 @@ pub async fn sqs_service<
         })
         .collect();
 
+
     futures::future::join_all(event_processors.iter().map(|ep| ep.0.start_processing())).await;
+
+    let mut proc_iter = event_processors.iter().cycle();
+    for message in initial_messages.into_iter() {
+        let next_proc = proc_iter.next().unwrap();
+        next_proc.0.process_event(message).await;
+    }
 
     sqs_consumer_handle.await;
     shutdown_notify.await;
