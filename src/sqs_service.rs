@@ -75,6 +75,7 @@ pub async fn sqs_service<
         OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
         EmissionResult: Future<Output=Result<(), Box<dyn Error + Send + Sync + 'static>>>  + Send + 'static,
 {
+    info!("sqs service init");
     let queue_url = queue_url.into();
     let dest_bucket = dest_bucket.into();
 

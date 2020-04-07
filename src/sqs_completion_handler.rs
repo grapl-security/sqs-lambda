@@ -201,12 +201,13 @@ impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr> SqsCompletionHandler<S
                 }
             );
 
-            let ack = (
-                tokio::time::timeout(Duration::from_millis(10), dmb).await.expect("timed out"),
-                msg_ids
-            );
+            let dmb = match tokio::time::timeout(Duration::from_millis(10), dmb).await {
+                Ok(dmb) => acks.push((dmb, msg_ids)),
+                Err(e) => {
+                    warn!("Failed to delete message, timed out: {:?}", e)
+                }
+            };
 
-            acks.push(ack);
         };
 
         info!("Acking all messages");
