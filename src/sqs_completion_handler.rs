@@ -201,7 +201,7 @@ impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr> SqsCompletionHandler<S
                 }
             );
 
-            let dmb = match tokio::time::timeout(Duration::from_millis(10), dmb).await {
+            match tokio::time::timeout(Duration::from_millis(10), dmb).await {
                 Ok(dmb) => acks.push((dmb, msg_ids)),
                 Err(e) => {
                     warn!("Failed to delete message, timed out: {:?}", e)
