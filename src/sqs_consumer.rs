@@ -128,7 +128,7 @@ impl<
                 Ok(new_events) => new_events,
                 Err(e) => {
                     warn!("Failed to get new events with: {:?}", e);
-                    tokio::time::delay_for(Duration::from_secs(1));
+                    tokio::time::delay_for(Duration::from_secs(1)).await;
                     self.self_actor.clone().unwrap().get_next_event(event_processor).await;
                     return;
                 }
@@ -171,7 +171,7 @@ impl<
             event_processor.process_event(next_event).await;
             info!("Sent next event to processor");
         } else {
-            tokio::time::delay_for(Duration::from_millis(500));
+            tokio::time::delay_for(Duration::from_millis(500)).await;
             info!("No events to send to processor");
             self.self_actor.clone().unwrap().get_next_event(event_processor).await;
         }
