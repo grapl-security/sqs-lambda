@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::compat::Future01CompatExt;
 use lambda_runtime::Context;
-use log::{info, warn};
+use log::{warn, debug};
 use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::sync::mpsc::{channel, Sender};
@@ -91,7 +91,7 @@ impl<
 > SqsConsumer<S, CH>
 {
     pub async fn batch_get_events(&self, wait_time_seconds: i64) -> Result<Vec<SqsMessage>, rusoto_core::RusotoError<ReceiveMessageError>> {
-        info!("Calling receive_message");
+        debug!("Calling receive_message");
         let recv = self.sqs_client.receive_message(
             ReceiveMessageRequest {
                 max_number_of_messages: Some(10),
@@ -107,7 +107,7 @@ impl<
         )
             .await
             .expect("batch_get_events timed out")?;
-        info!("Called receive_message : {:?}", recv);
+        debug!("Called receive_message : {:?}", recv);
 
         Ok(recv.messages.unwrap_or(vec![]))
     }
@@ -120,7 +120,7 @@ impl<
 > SqsConsumer<S, CH>
 {
     pub async fn get_new_event(&mut self, event_processor: EventProcessorActor<SqsMessage>) {
-        info!("New event request");
+        debug!("New event request");
         let should_consume = self.consume_policy.should_consume();
 
         if self.stored_events.is_empty() && should_consume {
@@ -139,18 +139,18 @@ impl<
         }
 
         if !should_consume {
-            info!("Done consuming, forcing ack");
+            debug!("Done consuming, forcing ack");
             let (tx, shutdown_notify) = tokio::sync::oneshot::channel();
 
             // If we're past the point of consuming it's time to start acking
             self.completion_handler.ack_all(Some(tx)).await;
 
             let _ = shutdown_notify.await;
-            info!("Ack complete");
+            debug!("Ack complete");
         }
 
         if self.stored_events.is_empty() && !should_consume {
-            info!("No more events to process, and we should not consume more");
+            debug!("No more events to process, and we should not consume more");
             let shutdown_subscriber = std::mem::replace(&mut self.shutdown_subscriber, None);
             match shutdown_subscriber {
                 Some(shutdown_subscriber) => {
@@ -167,12 +167,12 @@ impl<
         }
 
         if let Some(next_event) = self.stored_events.pop() {
-            info!("Sending next event to processor");
+            debug!("Sending next event to processor");
             event_processor.process_event(next_event).await;
-            info!("Sent next event to processor");
+            debug!("Sent next event to processor");
         } else {
             tokio::time::delay_for(Duration::from_millis(500)).await;
-            info!("No events to send to processor");
+            debug!("No events to send to processor");
             self.self_actor.clone().unwrap().get_next_event(event_processor).await;
         }
     }
