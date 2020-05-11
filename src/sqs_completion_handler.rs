@@ -152,7 +152,7 @@ impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr> SqsCompletionHandler<S
     }
 
     pub async fn ack_all(&mut self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
-        info!("Flushing completed events");
+        debug!("Flushing completed events");
 
         let serialized_event = self
             .completion_serializer
@@ -169,7 +169,7 @@ impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr> SqsCompletionHandler<S
             }
         };
 
-        info!("Emitting events");
+        debug!("Emitting events");
         self.event_emitter.emit_event(serialized_event).await.expect(
             "Failed to emit event"
         );
@@ -210,7 +210,7 @@ impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr> SqsCompletionHandler<S
 
         };
 
-        info!("Acking all messages");
+        debug!("Acking all messages");
 
         for (result, msg_ids) in acks {
             match result {
@@ -232,7 +232,7 @@ impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr> SqsCompletionHandler<S
             }
            // (self.on_ack)(result, message_id);
         }
-        info!("Acked");
+        debug!("Acked");
 
         self.completed_events.clear();
         self.completed_messages.clear();

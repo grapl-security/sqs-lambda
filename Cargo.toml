@@ -1,6 +1,6 @@
 [package]
 name = "sqs-lambda"
-version = "0.20.8"
+version = "0.20.9"
 authors = ["Insanitybit <insanitybit@gmail.com>"]
 edition = "2018"
 description = 'SQS Service helper library'
@@ -9,9 +9,9 @@ license = "MIT"
 
 [dependencies]
 
-rusoto_core = {version = "0.43.0-beta.1", default_features = false, features=["rustls"]}
-rusoto_s3 = {version = "0.43.0-beta.1", default_features = false, features=["rustls"]}
-rusoto_sqs = {version = "0.43.0-beta.1", default_features = false, features=["rustls"]}
+rusoto_core = {version = "0.43.0", default_features = false, features=["rustls"]}
+rusoto_s3 = {version = "0.43.0", default_features = false, features=["rustls"]}
+rusoto_sqs = {version = "0.43.0", default_features = false, features=["rustls"]}
 
 futures = {version="0.3", features=["compat"]}
 

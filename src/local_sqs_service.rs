@@ -97,8 +97,8 @@ pub async fn local_sqs_service<
                 on_emit,
             ),
             CompletionPolicy::new(
-                1000, // Buffer up to 1000 messages
-                Duration::from_secs(30), // Buffer for up to 30 seconds
+                10, // Buffer up to 10 messages
+                Duration::from_secs(3), // Buffer for up to 3 seconds
             ),
             on_ack,
             cache,
