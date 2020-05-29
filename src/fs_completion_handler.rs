@@ -15,13 +15,17 @@ use crate::event_handler::{Completion, OutputEvent};
 use crate::fs_event_emitter::FsEventEmitter;
 
 pub struct FsCompletionHandler<Err, CE, EventSerializer>
-    where
-
-        Err: Debug + Send + Sync + Clone + 'static,
-        CE: Send + Sync + Clone + 'static,
-        EventSerializer: CompletionEventSerializer<CompletedEvent=CE, Output=Vec<u8>, Error=crate::error::Error<Err>> + Send + Sync + Clone + 'static,
-
-
+where
+    Err: Debug + Send + Sync + Clone + 'static,
+    CE: Send + Sync + Clone + 'static,
+    EventSerializer: CompletionEventSerializer<
+            CompletedEvent = CE,
+            Output = Vec<u8>,
+            Error = crate::error::Error<Err>,
+        > + Send
+        + Sync
+        + Clone
+        + 'static,
 {
     self_actor: Option<FsCompletionHandlerActor<Err, CE, EventSerializer>>,
     completion_serializer: EventSerializer,
@@ -32,17 +36,19 @@ pub struct FsCompletionHandler<Err, CE, EventSerializer>
 }
 
 impl<Err, CE, EventSerializer> FsCompletionHandler<Err, CE, EventSerializer>
-    where
-        Err: Debug + Send + Sync + Clone + 'static,
-        CE: Send + Sync + Clone + 'static,
-        EventSerializer: CompletionEventSerializer<CompletedEvent=CE, Output=Vec<u8>, Error=crate::error::Error<Err>> + Send + Sync + Clone + 'static,
-
-
+where
+    Err: Debug + Send + Sync + Clone + 'static,
+    CE: Send + Sync + Clone + 'static,
+    EventSerializer: CompletionEventSerializer<
+            CompletedEvent = CE,
+            Output = Vec<u8>,
+            Error = crate::error::Error<Err>,
+        > + Send
+        + Sync
+        + Clone
+        + 'static,
 {
-    pub fn new(
-        completion_serializer: EventSerializer,
-        fs_event_emitter: FsEventEmitter,
-    ) -> Self {
+    pub fn new(completion_serializer: EventSerializer, fs_event_emitter: FsEventEmitter) -> Self {
         Self {
             self_actor: None,
             completion_serializer,
@@ -56,13 +62,23 @@ impl<Err, CE, EventSerializer> FsCompletionHandler<Err, CE, EventSerializer>
 
 #[derive_actor]
 impl<
-    Err: Debug + Send + Sync + Clone + 'static,
-    CE: Send + Sync + Clone + 'static,
-    EventSerializer: CompletionEventSerializer<CompletedEvent=CE, Output=Vec<u8>, Error=crate::error::Error<Err>> + Send + Sync + Clone + 'static,
->
-FsCompletionHandler<Err, CE, EventSerializer>
+        Err: Debug + Send + Sync + Clone + 'static,
+        CE: Send + Sync + Clone + 'static,
+        EventSerializer: CompletionEventSerializer<
+                CompletedEvent = CE,
+                Output = Vec<u8>,
+                Error = crate::error::Error<Err>,
+            > + Send
+            + Sync
+            + Clone
+            + 'static,
+    > FsCompletionHandler<Err, CE, EventSerializer>
 {
-    pub async fn mark_complete(&mut self, msg: FsEvent, completed: OutputEvent<CE, crate::error::Error<Err>>) {
+    pub async fn mark_complete(
+        &mut self,
+        msg: FsEvent,
+        completed: OutputEvent<CE, crate::error::Error<Err>>,
+    ) {
         match completed.completed_event {
             Completion::Total(ce) => {
                 info!("Marking all events complete - total success");
@@ -126,24 +142,26 @@ FsCompletionHandler<Err, CE, EventSerializer>
     pub fn _p(&self, _p: std::marker::PhantomData<(Err, CE, EventSerializer)>) {}
 }
 
-
 #[async_trait]
-impl<Err, CE, EventSerializer> CompletionHandler for FsCompletionHandlerActor<Err, CE, EventSerializer>
-    where
-        Err: Debug + Send + Sync + Clone + 'static,
-        CE: Send + Sync + Clone + 'static,
-        EventSerializer: CompletionEventSerializer<CompletedEvent=CE, Output=Vec<u8>, Error=crate::error::Error<Err>> + Send + Sync + Clone + 'static,
-
+impl<Err, CE, EventSerializer> CompletionHandler
+    for FsCompletionHandlerActor<Err, CE, EventSerializer>
+where
+    Err: Debug + Send + Sync + Clone + 'static,
+    CE: Send + Sync + Clone + 'static,
+    EventSerializer: CompletionEventSerializer<
+            CompletedEvent = CE,
+            Output = Vec<u8>,
+            Error = crate::error::Error<Err>,
+        > + Send
+        + Sync
+        + Clone
+        + 'static,
 {
     type Message = FsEvent;
     type CompletedEvent = OutputEvent<CE, crate::error::Error<Err>>;
 
     async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent) {
-        FsCompletionHandlerActor::mark_complete(
-            &self,
-            msg,
-            completed_event,
-        ).await
+        FsCompletionHandlerActor::mark_complete(&self, msg, completed_event).await
     }
 
     async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>) {

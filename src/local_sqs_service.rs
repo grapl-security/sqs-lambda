@@ -3,22 +3,26 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::info;
 use rusoto_s3::S3;
-use rusoto_sqs::{Sqs, SendMessageRequest, SqsClient};
+use rusoto_sqs::{SendMessageRequest, Sqs, SqsClient};
 
 use crate::cache::{Cache, NopCache};
 use crate::completion_event_serializer::CompletionEventSerializer;
 use crate::event_decoder::PayloadDecoder;
-use crate::s3_event_emitter::S3EventEmitter;
-use crate::event_handler::{EventHandler, OutputEvent};
 use crate::event_handler;
+use crate::event_handler::{EventHandler, OutputEvent};
 use crate::event_processor::{EventProcessor, EventProcessorActor};
 use crate::event_retriever::S3PayloadRetriever;
-use crate::sqs_completion_handler::{CompletionPolicy, SqsCompletionHandler, SqsCompletionHandlerActor};
+use crate::s3_event_emitter::S3EventEmitter;
+use crate::sqs_completion_handler::{
+    CompletionPolicy, SqsCompletionHandler, SqsCompletionHandlerActor,
+};
 use crate::sqs_consumer::{ConsumePolicy, SqsConsumer, SqsConsumerActor};
-use aws_lambda_events::event::s3::{S3Event, S3EventRecord, S3UserIdentity, S3RequestParameters, S3Entity, S3Bucket, S3Object};
+use aws_lambda_events::event::s3::{
+    S3Bucket, S3Entity, S3Event, S3EventRecord, S3Object, S3RequestParameters, S3UserIdentity,
+};
 use rusoto_core::Region;
-use std::future::Future;
 use std::error::Error;
+use std::future::Future;
 
 fn time_based_key_fn(_event: &[u8]) -> String {
     let cur_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -28,10 +32,7 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 
     let cur_day = cur_ms - (cur_ms % 86400);
 
-    format!(
-        "{}/{}-{}",
-        cur_day, cur_ms, uuid::Uuid::new_v4()
-    )
+    format!("{}/{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
 pub async fn local_sqs_service<
@@ -60,33 +61,53 @@ pub async fn local_sqs_service<
     on_ack: OnAck,
     on_emit: OnEmission,
 ) -> Result<(), Box<dyn std::error::Error>>
-    where
-        Err: Debug + Clone + Send + Sync + 'static,
-        S3T: S3 + Clone + Send + Sync + 'static,
-        SqsT: Sqs + Clone + Send + Sync + 'static,
-        CompletedEventT: Clone + Send + Sync + 'static,
-        EventT: Clone + Send + Sync + 'static,
-        EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
-        EventEncoderT: CompletionEventSerializer<CompletedEvent=CompletedEventT, Output=Vec<u8>, Error=<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
-        EventHandlerT: EventHandler<InputEvent=EventT, OutputEvent=CompletedEventT, Error=crate::error::Error<Err>> + Clone + Send + Sync + 'static,
-        CacheT: Cache<<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
-        OnAck: Fn(SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>, Result<String, String>) + Send + Sync + 'static,
-        OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
-        EmissionResult: Future<Output=Result<(), Box<dyn Error + Send + Sync + 'static>>>  + Send + 'static,
+where
+    Err: Debug + Clone + Send + Sync + 'static,
+    S3T: S3 + Clone + Send + Sync + 'static,
+    SqsT: Sqs + Clone + Send + Sync + 'static,
+    CompletedEventT: Clone + Send + Sync + 'static,
+    EventT: Clone + Send + Sync + 'static,
+    EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
+    EventEncoderT: CompletionEventSerializer<
+            CompletedEvent = CompletedEventT,
+            Output = Vec<u8>,
+            Error = <EventHandlerT as EventHandler>::Error,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    EventHandlerT: EventHandler<
+            InputEvent = EventT,
+            OutputEvent = CompletedEventT,
+            Error = crate::error::Error<Err>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    CacheT: Cache<<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
+    OnAck: Fn(
+            SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>,
+            Result<String, String>,
+        ) + Send
+        + Sync
+        + 'static,
+    OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
+    EmissionResult:
+        Future<Output = Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
 {
     let queue_url = queue_url.into();
     let dest_bucket = dest_bucket.into();
 
     let consume_policy = ConsumePolicy::new(
-        ctx, // Use the Context.deadline from the lambda_runtime
+        ctx,                    // Use the Context.deadline from the lambda_runtime
         Duration::from_secs(5), // Stop consuming when there's N seconds left in the runtime
-        300, // Maximum of 3 empty receives before we stop
+        300,                    // Maximum of 3 empty receives before we stop
     );
 
     let (tx, shutdown_notify) = tokio::sync::oneshot::channel();
 
-    let (sqs_completion_handler, sqs_completion_handle) = SqsCompletionHandlerActor::new(
-        SqsCompletionHandler::new(
+    let (sqs_completion_handler, sqs_completion_handle) =
+        SqsCompletionHandlerActor::new(SqsCompletionHandler::new(
             sqs_client.clone(),
             queue_url.clone(),
             event_encoder,
@@ -97,23 +118,21 @@ pub async fn local_sqs_service<
                 on_emit,
             ),
             CompletionPolicy::new(
-                10, // Buffer up to 10 messages
+                10,                     // Buffer up to 10 messages
                 Duration::from_secs(3), // Buffer for up to 3 seconds
             ),
             on_ack,
             cache,
-        )
-    );
+        ));
 
-    let (sqs_consumer, sqs_consumer_handle) = SqsConsumerActor::new(
-        SqsConsumer::new(
-            sqs_client.clone(),
-            queue_url.clone(),
-            consume_policy,
-            sqs_completion_handler.clone(),
-            tx,
-        )
-    ).await;
+    let (sqs_consumer, sqs_consumer_handle) = SqsConsumerActor::new(SqsConsumer::new(
+        sqs_client.clone(),
+        queue_url.clone(),
+        consume_policy,
+        sqs_completion_handler.clone(),
+        tx,
+    ))
+    .await;
 
     // info!("size of sqs_consumer {}", std::mem::size_of::<
     //     SqsConsumerActor<

@@ -11,17 +11,18 @@ use crate::event_retriever::PayloadRetriever;
 
 #[derive(Clone)]
 pub struct FsRetriever<D, E>
-    where D: PayloadDecoder<E> + Clone + Send + 'static,
-          E: Send + 'static
+where
+    D: PayloadDecoder<E> + Clone + Send + 'static,
+    E: Send + 'static,
 {
     decoder: D,
     phantom: PhantomData<E>,
 }
 
-
 impl<D, E> FsRetriever<D, E>
-    where D: PayloadDecoder<E> + Clone + Send + 'static,
-          E: Send + 'static
+where
+    D: PayloadDecoder<E> + Clone + Send + 'static,
+    E: Send + 'static,
 {
     pub fn new(decoder: D) -> Self {
         Self {
@@ -33,8 +34,9 @@ impl<D, E> FsRetriever<D, E>
 
 #[async_trait]
 impl<D, E> PayloadRetriever<E> for FsRetriever<D, E>
-    where D: PayloadDecoder<E> + Clone + Send + 'static,
-          E: Send + 'static
+where
+    D: PayloadDecoder<E> + Clone + Send + 'static,
+    E: Send + 'static,
 {
     type Message = FsEvent;
 
