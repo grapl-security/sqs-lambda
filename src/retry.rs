@@ -35,7 +35,7 @@ impl<E> ErrorHandler<RusotoError<E>> for RetryHandler {
                 let backoff = jitter + (self.attempt as u64 * 10);
                 RetryPolicy::WaitRetry(Duration::from_millis(backoff))
             }
-            _ => RetryPolicy::ForwardError(e)
+            _ => RetryPolicy::ForwardError(e),
         }
     }
 

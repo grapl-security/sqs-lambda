@@ -1,11 +1,11 @@
-use log::info;
 use async_trait::async_trait;
+use log::info;
 
 use crate::event_emitter::EventEmitter;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::Write;
-use std::fmt::Debug;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn time_based_key_fn() -> String {
     let cur_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -15,28 +15,22 @@ fn time_based_key_fn() -> String {
 
     let cur_day = cur_ms - (cur_ms % 86400);
 
-    format!(
-        "{}-{}-{}",
-        cur_day, cur_ms, uuid::Uuid::new_v4()
-    )
+    format!("{}-{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
 pub struct FsEventEmitter {
-    directory: String
+    directory: String,
 }
 
 impl FsEventEmitter {
     pub fn new(directory: impl Into<String>) -> Self {
         let directory = directory.into();
-        Self {
-            directory
-        }
+        Self { directory }
     }
 }
 
 #[async_trait]
-impl EventEmitter for FsEventEmitter
-{
+impl EventEmitter for FsEventEmitter {
     type Event = Vec<u8>;
     type Error = crate::error::Error<()>;
 

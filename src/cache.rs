@@ -9,8 +9,8 @@ pub trait Cacheable {
 }
 
 impl<H> Cacheable for H
-    where
-        H: Hash
+where
+    H: Hash,
 {
     fn identity(&self) -> Vec<u8> {
         let mut hasher = DefaultHasher::new();
@@ -28,33 +28,36 @@ pub enum CacheResponse {
 
 #[async_trait]
 pub trait Cache<E>
-    where
-        E: Debug + Clone + Send + Sync + 'static,
+where
+    E: Debug + Clone + Send + Sync + 'static,
 {
-    async fn get<CA: Cacheable + Send + Sync + 'static>
-            (&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>;
+    async fn get<CA: Cacheable + Send + Sync + 'static>(
+        &mut self,
+        cacheable: CA,
+    ) -> Result<CacheResponse, crate::error::Error<E>>;
     async fn store(&mut self, identity: Vec<u8>) -> Result<(), crate::error::Error<E>>;
 }
 
 #[async_trait]
 pub trait ReadableCache<E>
-    where
-        E: Debug + Clone + Send + Sync + 'static,
+where
+    E: Debug + Clone + Send + Sync + 'static,
 {
-    async fn get<CA: Cacheable + Send + Sync + 'static>(&mut self, cacheable: CA)
-        -> Result<CacheResponse, crate::error::Error<E>>;
+    async fn get<CA: Cacheable + Send + Sync + 'static>(
+        &mut self,
+        cacheable: CA,
+    ) -> Result<CacheResponse, crate::error::Error<E>>;
 }
 
 #[async_trait]
 impl<C, E> ReadableCache<E> for C
-    where
-        C: Cache<E> + Send + Sync + 'static,
-        E: Debug + Clone + Send + Sync + 'static,
+where
+    C: Cache<E> + Send + Sync + 'static,
+    E: Debug + Clone + Send + Sync + 'static,
 {
-
     async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>
-        where
-            CA: Cacheable + Send + Sync + 'static
+    where
+        CA: Cacheable + Send + Sync + 'static,
     {
         Cache::get(self, cacheable).await
     }
@@ -63,15 +66,15 @@ impl<C, E> ReadableCache<E> for C
 #[derive(Clone)]
 pub struct NopCache {}
 
-
 #[async_trait]
 impl<E> Cache<E> for NopCache
-    where
-        E: Debug + Clone + Send + Sync + 'static,
+where
+    E: Debug + Clone + Send + Sync + 'static,
 {
-    async fn get<CA: Cacheable + Send + Sync + 'static,>(&mut self, _cacheable: CA)
-        -> Result<CacheResponse, crate::error::Error<E>>
-    {
+    async fn get<CA: Cacheable + Send + Sync + 'static>(
+        &mut self,
+        _cacheable: CA,
+    ) -> Result<CacheResponse, crate::error::Error<E>> {
         Ok(CacheResponse::Miss)
     }
     async fn store(&mut self, _identity: Vec<u8>) -> Result<(), crate::error::Error<E>> {

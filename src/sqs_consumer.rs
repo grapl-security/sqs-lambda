@@ -2,16 +2,16 @@ use std::time::Duration;
 
 use futures::compat::Future01CompatExt;
 use lambda_runtime::Context;
-use log::{warn, debug};
-use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
+use log::{debug, warn};
 use rusoto_sqs::Message as SqsMessage;
+use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
 use tokio::sync::mpsc::{channel, Sender};
 
 use crate::consumer::Consumer;
 use async_trait::async_trait;
 
-use crate::event_processor::EventProcessorActor;
 use crate::completion_handler::CompletionHandler;
+use crate::event_processor::EventProcessorActor;
 use aktors::actor::Actor;
 use std::marker::PhantomData;
 
@@ -47,9 +47,9 @@ impl ConsumePolicy {
 }
 
 pub struct SqsConsumer<S, CH>
-    where
-        S: Sqs + Send + Sync + 'static,
-        CH: CompletionHandler + Clone + Send + Sync + 'static
+where
+    S: Sqs + Send + Sync + 'static,
+    CH: CompletionHandler + Clone + Send + Sync + 'static,
 {
     sqs_client: S,
     queue_url: String,
@@ -61,8 +61,9 @@ pub struct SqsConsumer<S, CH>
 }
 
 impl<S, CH> SqsConsumer<S, CH>
-    where S: Sqs + Send + Sync + 'static,
-          CH: CompletionHandler + Clone + Send + Sync + 'static
+where
+    S: Sqs + Send + Sync + 'static,
+    CH: CompletionHandler + Clone + Send + Sync + 'static,
 {
     pub fn new(
         sqs_client: S,
@@ -71,8 +72,8 @@ impl<S, CH> SqsConsumer<S, CH>
         completion_handler: CH,
         shutdown_subscriber: tokio::sync::oneshot::Sender<()>,
     ) -> SqsConsumer<S, CH>
-        where
-            S: Sqs,
+    where
+        S: Sqs,
     {
         Self {
             sqs_client,
@@ -85,26 +86,22 @@ impl<S, CH> SqsConsumer<S, CH>
         }
     }
 }
-impl<
-    S: Sqs + Send + Sync + 'static,
-    CH: CompletionHandler + Clone + Send + Sync + 'static
-> SqsConsumer<S, CH>
+impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync + 'static>
+    SqsConsumer<S, CH>
 {
-    pub async fn batch_get_events(&self, wait_time_seconds: i64) -> Result<Vec<SqsMessage>, rusoto_core::RusotoError<ReceiveMessageError>> {
+    pub async fn batch_get_events(
+        &self,
+        wait_time_seconds: i64,
+    ) -> Result<Vec<SqsMessage>, rusoto_core::RusotoError<ReceiveMessageError>> {
         debug!("Calling receive_message");
-        let recv = self.sqs_client.receive_message(
-            ReceiveMessageRequest {
-                max_number_of_messages: Some(10),
-                queue_url: self.queue_url.clone(),
-                wait_time_seconds: Some(wait_time_seconds),
-                ..Default::default()
-            }
-        );
+        let recv = self.sqs_client.receive_message(ReceiveMessageRequest {
+            max_number_of_messages: Some(10),
+            queue_url: self.queue_url.clone(),
+            wait_time_seconds: Some(wait_time_seconds),
+            ..Default::default()
+        });
 
-        let recv = tokio::time::timeout(
-            Duration::from_secs(wait_time_seconds as u64 + 2),
-            recv
-        )
+        let recv = tokio::time::timeout(Duration::from_secs(wait_time_seconds as u64 + 2), recv)
             .await
             .expect("batch_get_events timed out")?;
         debug!("Called receive_message : {:?}", recv);
@@ -114,10 +111,8 @@ impl<
 }
 
 #[derive_aktor::derive_actor]
-impl<
-    S: Sqs + Send + Sync + 'static,
-    CH: CompletionHandler + Clone + Send + Sync + 'static
-> SqsConsumer<S, CH>
+impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync + 'static>
+    SqsConsumer<S, CH>
 {
     pub async fn get_new_event(&mut self, event_processor: EventProcessorActor<SqsMessage>) {
         debug!("New event request");
@@ -129,12 +124,17 @@ impl<
                 Err(e) => {
                     warn!("Failed to get new events with: {:?}", e);
                     tokio::time::delay_for(Duration::from_secs(1)).await;
-                    self.self_actor.clone().unwrap().get_next_event(event_processor).await;
+                    self.self_actor
+                        .clone()
+                        .unwrap()
+                        .get_next_event(event_processor)
+                        .await;
                     return;
                 }
             };
 
-            self.consume_policy.register_received(!new_events.is_empty());
+            self.consume_policy
+                .register_received(!new_events.is_empty());
             self.stored_events.extend(new_events);
         }
 
@@ -156,14 +156,14 @@ impl<
                 Some(shutdown_subscriber) => {
                     shutdown_subscriber.send(()).unwrap();
                 }
-                None => warn!("Attempted to shut down with empty shutdown_subscriber")
+                None => warn!("Attempted to shut down with empty shutdown_subscriber"),
             };
 
             event_processor.stop_processing().await;
             event_processor.release().await;
             self.completion_handler.clone().release().await;
             self.self_actor.clone().unwrap().release().await;
-            return
+            return;
         }
 
         if let Some(next_event) = self.stored_events.pop() {
@@ -173,38 +173,40 @@ impl<
         } else {
             tokio::time::delay_for(Duration::from_millis(500)).await;
             debug!("No events to send to processor");
-            self.self_actor.clone().unwrap().get_next_event(event_processor).await;
+            self.self_actor
+                .clone()
+                .unwrap()
+                .get_next_event(event_processor)
+                .await;
         }
     }
 
     pub async fn _p(&self, __p: PhantomData<(S, CH)>) {}
-
 }
-
 
 #[async_trait]
 impl<S, CH> Consumer<SqsMessage> for SqsConsumerActor<S, CH>
-    where
-        S: Sqs + Send + Sync + 'static,
-        CH: CompletionHandler + Clone + Send + Sync + 'static
+where
+    S: Sqs + Send + Sync + 'static,
+    CH: CompletionHandler + Clone + Send + Sync + 'static,
 {
     async fn get_next_event(&self, event_processor: EventProcessorActor<SqsMessage>) {
         let msg = SqsConsumerMessage::get_new_event { event_processor };
-        self.queue_len.clone().fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.queue_len
+            .clone()
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         let mut sender = self.sender.clone();
-        tokio::task::spawn(
-            async move {
-                if let Err(e) = sender.send(msg).await {
-                    panic!(
-                        concat!(
-                            "Receiver has failed with {}, propagating error. ",
-                            "SqsConsumerActor.get_next_event"
-                        ),
-                        e
-                    )
-                }
+        tokio::task::spawn(async move {
+            if let Err(e) = sender.send(msg).await {
+                panic!(
+                    concat!(
+                        "Receiver has failed with {}, propagating error. ",
+                        "SqsConsumerActor.get_next_event"
+                    ),
+                    e
+                )
             }
-        );
+        });
     }
 }

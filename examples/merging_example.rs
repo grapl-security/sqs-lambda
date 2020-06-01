@@ -4,86 +4,74 @@ extern crate rusoto_sqs;
 extern crate sqs_lambda;
 extern crate tokio;
 
-use log::{info, Level};
-use std::collections::HashMap;
+use log::Level;
 use std::error::Error;
 use std::io::Cursor;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use prost::Message;
 use rusoto_s3::S3Client;
-use rusoto_sqs::{SqsClient, SendMessageRequest, Sqs};
+use rusoto_sqs::SqsClient;
 use serde::Deserialize;
 
 use async_trait::async_trait;
-use event_processor::*;
-use sqs_completion_handler::*;
-use sqs_consumer::*;
-use sqs_lambda::completion_event_serializer::CompletionEventSerializer;
-use sqs_lambda::event_decoder::PayloadDecoder;
-use sqs_lambda::s3_event_emitter::S3EventEmitter;
-use sqs_lambda::event_handler::{EventHandler, OutputEvent, Completion};
-use sqs_lambda::event_processor;
-use sqs_lambda::event_retriever::S3PayloadRetriever;
-use sqs_lambda::sqs_completion_handler;
-use sqs_lambda::sqs_consumer;
-use sqs_lambda::redis_cache::RedisCache;
-use sqs_lambda::fs_completion_handler::{FsCompletionHandler, FsCompletionHandlerActor};
-use sqs_lambda::fs_event_emitter::FsEventEmitter;
-use sqs_lambda::fs_event_retriever::FsRetriever;
-use sqs_lambda::error::Error as SqsLambdaError;
-use sqs_lambda::fs_notify_consumer::{FsNotifyConsumerHandler, FsNotifyConsumerHandlerActor};
-use sqs_lambda::cache::{NopCache, Cache};
-use sqs_lambda::local_service::local_service;
-use sqs_lambda::sqs_service::sqs_service;
-use std::fmt::Debug;
-use aws_lambda_events::event::s3::{S3UserIdentity, S3RequestParameters, S3Entity, S3Bucket, S3Object, S3Event, S3EventRecord};
-use rusoto_core::Region;
-use sqs_lambda::local_sqs_service::local_sqs_service;
-use lambda_runtime::Context;
+use aws_lambda_events::event::s3::{
+    S3Bucket, S3Entity, S3Event, S3EventRecord, S3Object, S3RequestParameters, S3UserIdentity,
+};
 use chrono::Utc;
+use lambda_runtime::Context;
+use prost::bytes::Bytes;
+use rusoto_core::Region;
+use sqs_lambda::cache::{Cache, NopCache};
+use sqs_lambda::completion_event_serializer::CompletionEventSerializer;
+use sqs_lambda::error::Error as SqsLambdaError;
+use sqs_lambda::event_decoder::PayloadDecoder;
+use sqs_lambda::event_handler::{Completion, EventHandler, OutputEvent};
+use sqs_lambda::local_sqs_service::local_sqs_service;
+use std::fmt::Debug;
 
 #[derive(Clone)]
 struct MyService<C, E>
-    where
-        C: Cache<E> + Clone + Send + Sync + 'static,
-        E: Debug + Clone + Send + Sync + 'static,
+where
+    C: Cache<E> + Clone + Send + Sync + 'static,
+    E: Debug + Clone + Send + Sync + 'static,
 {
     cache: C,
     _p: std::marker::PhantomData<(E)>,
 }
 
-
 impl<C, E> MyService<C, E>
-    where
-        C: Cache<E> + Clone + Send + Sync + 'static,
-        E: Debug + Clone + Send + Sync + 'static,
+where
+    C: Cache<E> + Clone + Send + Sync + 'static,
+    E: Debug + Clone + Send + Sync + 'static,
 {
     pub fn new(cache: C) -> Self {
         Self {
-            cache ,
-            _p: std::marker::PhantomData
+            cache,
+            _p: std::marker::PhantomData,
         }
     }
 }
 
 #[async_trait]
 impl<C, E> EventHandler for MyService<C, E>
-    where
-        C: Cache<E> + Clone + Send + Sync + 'static,
-        E: Debug + Clone + Send + Sync + 'static,
+where
+    C: Cache<E> + Clone + Send + Sync + 'static,
+    E: Debug + Clone + Send + Sync + 'static,
 {
     type InputEvent = Vec<u8>;
     type OutputEvent = Subgraph;
     type Error = SqsLambdaError<()>;
 
-    async fn handle_event(&mut self, _input: Self::InputEvent) -> OutputEvent<Self::OutputEvent, Self::Error> {
+    async fn handle_event(
+        &mut self,
+        _input: Self::InputEvent,
+    ) -> OutputEvent<Self::OutputEvent, Self::Error> {
         // do some work
         println!("aerbpioajerobviajervoijaerv;oaiejrv;oaleirjn;aoerivjae;orivjaer;orivjaeraerkvao;ieljnva;eorivnmae;orinp
         AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH");
-        let mut completed: OutputEvent<Subgraph, SqsLambdaError<()>> = OutputEvent::new(Completion::Total(Subgraph {}));
+        let mut completed: OutputEvent<Subgraph, SqsLambdaError<()>> =
+            OutputEvent::new(Completion::Total(Subgraph {}));
 
         // for input in _input.keys() {
         //     completed.add_identity(input);
@@ -92,7 +80,6 @@ impl<C, E> EventHandler for MyService<C, E>
         completed
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub struct Subgraph {}
@@ -124,7 +111,7 @@ impl CompletionEventSerializer for SubgraphSerializer {
             subgraph.merge(sg);
         }
 
-//        subgraph.into_bytes()
+        //        subgraph.into_bytes()
         Ok(vec![])
     }
 }
@@ -133,10 +120,12 @@ impl CompletionEventSerializer for SubgraphSerializer {
 pub struct ZstdProtoDecoder;
 
 impl<E> PayloadDecoder<E> for ZstdProtoDecoder
-    where E: Message + Default
+where
+    E: Message + Default,
 {
     fn decode(&mut self, body: Vec<u8>) -> Result<E, Box<dyn Error>>
-        where E: Message + Default,
+    where
+        E: Message + Default,
     {
         let mut decompressed = Vec::new();
 
@@ -144,19 +133,19 @@ impl<E> PayloadDecoder<E> for ZstdProtoDecoder
 
         zstd::stream::copy_decode(&mut body, &mut decompressed)?;
 
-        Ok(E::decode(decompressed)?)
+        let buf = Bytes::from(decompressed);
+
+        Ok(E::decode(buf)?)
     }
 }
 
 #[derive(Clone, Default)]
 pub struct ZstdDecoder {
-    pub buffer: Vec<u8>
+    pub buffer: Vec<u8>,
 }
 
-impl PayloadDecoder<Vec<u8>> for ZstdDecoder
-{
-    fn decode(&mut self, body: Vec<u8>) -> Result<Vec<u8>, Box<dyn Error>>
-    {
+impl PayloadDecoder<Vec<u8>> for ZstdDecoder {
+    fn decode(&mut self, body: Vec<u8>) -> Result<Vec<u8>, Box<dyn Error>> {
         self.buffer.clear();
 
         let mut body = Cursor::new(&body);
@@ -169,14 +158,14 @@ impl PayloadDecoder<Vec<u8>> for ZstdDecoder
 
 #[derive(Clone, Default)]
 pub struct ZstdJsonDecoder {
-    pub buffer: Vec<u8>
+    pub buffer: Vec<u8>,
 }
 
 impl<E> PayloadDecoder<E> for ZstdJsonDecoder
-    where E: for<'a> Deserialize<'a>
+where
+    E: for<'a> Deserialize<'a>,
 {
-    fn decode(&mut self, body: Vec<u8>) -> Result<E, Box<dyn Error>>
-    {
+    fn decode(&mut self, body: Vec<u8>) -> Result<E, Box<dyn Error>> {
         self.buffer.clear();
 
         let mut body = Cursor::new(&body);
@@ -187,17 +176,14 @@ impl<E> PayloadDecoder<E> for ZstdJsonDecoder
     }
 }
 
-
-fn init_sqs_client() -> SqsClient
-{
+fn init_sqs_client() -> SqsClient {
     SqsClient::new(Region::Custom {
         name: "localsqs".to_string(),
         endpoint: "http://localhost:9324".to_string(),
     })
 }
 
-fn init_s3_client() -> S3Client
-{
+fn init_s3_client() -> S3Client {
     S3Client::new(Region::Custom {
         name: "locals3".to_string(),
         endpoint: "http://localhost:4572".to_string(),
@@ -212,10 +198,7 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 
     let cur_day = cur_ms - (cur_ms % 86400);
 
-    format!(
-        "{}/{}-{}",
-        cur_day, cur_ms, uuid::Uuid::new_v4()
-    )
+    format!("{}/{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
 // #[tokio::main]
@@ -231,7 +214,6 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 //         service,
 //     ).await
 // }
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -253,38 +235,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SubgraphSerializer {},
         service,
         NopCache {},
-        |_, event_result | {dbg!(event_result);},
+        |_, event_result| {
+            dbg!(event_result);
+        },
         move |bucket, key| async move {
             let output_event = S3Event {
-                records: vec![
-                    S3EventRecord {
-                        event_version: None,
-                        event_source: None,
-                        aws_region: None,
-                        event_time: chrono::Utc::now(),
-                        event_name: None,
-                        principal_id: S3UserIdentity { principal_id: None },
-                        request_parameters: S3RequestParameters { source_ip_address: None },
-                        response_elements: Default::default(),
-                        s3: S3Entity {
-                            schema_version: None,
-                            configuration_id: None,
-                            bucket: S3Bucket {
-                                name: Some(bucket),
-                                owner_identity: S3UserIdentity { principal_id: None },
-                                arn: None
-                            },
-                            object: S3Object {
-                                key: Some(key),
-                                size: 0,
-                                url_decoded_key: None,
-                                version_id: None,
-                                e_tag: None,
-                                sequencer: None
-                            }
-                        }
-                    }
-                ]
+                records: vec![S3EventRecord {
+                    event_version: None,
+                    event_source: None,
+                    aws_region: None,
+                    event_time: chrono::Utc::now(),
+                    event_name: None,
+                    principal_id: S3UserIdentity { principal_id: None },
+                    request_parameters: S3RequestParameters {
+                        source_ip_address: None,
+                    },
+                    response_elements: Default::default(),
+                    s3: S3Entity {
+                        schema_version: None,
+                        configuration_id: None,
+                        bucket: S3Bucket {
+                            name: Some(bucket),
+                            owner_identity: S3UserIdentity { principal_id: None },
+                            arn: None,
+                        },
+                        object: S3Object {
+                            key: Some(key),
+                            size: 0,
+                            url_decoded_key: None,
+                            version_id: None,
+                            e_tag: None,
+                            sequencer: None,
+                        },
+                    },
+                }],
             };
 
             let sqs_client = init_sqs_client();
@@ -300,9 +284,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // ).await;
 
             Ok(())
-        }
-    ).await;
+        },
+    )
+    .await;
 
     Ok(())
 }
-
