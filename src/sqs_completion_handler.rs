@@ -60,7 +60,7 @@ where
         + Sync
         + 'static,
     CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
     sqs_client: SqsT,
     queue_url: String,
@@ -93,7 +93,7 @@ where
         + Sync
         + 'static,
     CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
     pub fn new(
         sqs_client: SqsT,
@@ -138,7 +138,7 @@ where
         + Sync
         + 'static,
     CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
     pub async fn mark_complete(
         &mut self,
@@ -273,7 +273,7 @@ where
 pub enum SqsCompletionHandlerMessage<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     mark_complete {
@@ -308,7 +308,7 @@ where
         + Sync
         + 'static,
     CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
     async fn route_message(&mut self, msg: SqsCompletionHandlerMessage<CE, ProcErr, SqsT>) {
         match msg {
@@ -333,7 +333,7 @@ where
 pub struct SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     sender: Sender<SqsCompletionHandlerMessage<CE, ProcErr, SqsT>>,
@@ -347,7 +347,7 @@ where
 impl<CE, ProcErr, SqsT> Clone for SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -374,7 +374,7 @@ where
 impl<CE, ProcErr, SqsT> SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     pub fn new<CPE, CP, Payload, EE, OA, CacheT>(
@@ -494,7 +494,7 @@ where
 impl<CE, ProcErr, SqsT> Drop for SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -508,7 +508,7 @@ where
 impl<CE, ProcErr, SqsT> CompletionHandler for SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     type Message = SqsMessage;
@@ -530,7 +530,7 @@ where
 impl<CE, ProcErr, SqsT> aktors::actor::Message for SqsCompletionHandlerMessage<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     fn is_release(&self) -> bool {

@@ -16,7 +16,7 @@ use crate::fs_event_emitter::FsEventEmitter;
 
 pub struct FsCompletionHandler<Err, CE, EventSerializer>
 where
-    Err: Debug + Send + Sync + Clone + 'static,
+    Err: Debug + Send + Sync + 'static,
     CE: Send + Sync + Clone + 'static,
     EventSerializer: CompletionEventSerializer<
             CompletedEvent = CE,
@@ -37,7 +37,7 @@ where
 
 impl<Err, CE, EventSerializer> FsCompletionHandler<Err, CE, EventSerializer>
 where
-    Err: Debug + Send + Sync + Clone + 'static,
+    Err: Debug + Send + Sync + 'static,
     CE: Send + Sync + Clone + 'static,
     EventSerializer: CompletionEventSerializer<
             CompletedEvent = CE,
@@ -62,7 +62,7 @@ where
 
 #[derive_actor]
 impl<
-        Err: Debug + Send + Sync + Clone + 'static,
+        Err: Debug + Send + Sync + 'static,
         CE: Send + Sync + Clone + 'static,
         EventSerializer: CompletionEventSerializer<
                 CompletedEvent = CE,
@@ -146,7 +146,7 @@ impl<
 impl<Err, CE, EventSerializer> CompletionHandler
     for FsCompletionHandlerActor<Err, CE, EventSerializer>
 where
-    Err: Debug + Send + Sync + Clone + 'static,
+    Err: Debug + Send + Sync + 'static,
     CE: Send + Sync + Clone + 'static,
     EventSerializer: CompletionEventSerializer<
             CompletedEvent = CE,

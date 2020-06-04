@@ -61,39 +61,39 @@ pub async fn local_sqs_service<
     on_ack: OnAck,
     on_emit: OnEmission,
 ) -> Result<(), Box<dyn std::error::Error>>
-where
-    Err: Debug + Clone + Send + Sync + 'static,
-    S3T: S3 + Clone + Send + Sync + 'static,
-    SqsT: Sqs + Clone + Send + Sync + 'static,
-    CompletedEventT: Clone + Send + Sync + 'static,
-    EventT: Clone + Send + Sync + 'static,
-    EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
-    EventEncoderT: CompletionEventSerializer<
-            CompletedEvent = CompletedEventT,
-            Output = Vec<u8>,
-            Error = <EventHandlerT as EventHandler>::Error,
+    where
+        Err: Debug + Send + Sync + 'static,
+        S3T: S3 + Clone + Send + Sync + 'static,
+        SqsT: Sqs + Clone + Send + Sync + 'static,
+        CompletedEventT: Clone + Send + Sync + 'static,
+        EventT: Clone + Send + Sync + 'static,
+        EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
+        EventEncoderT: CompletionEventSerializer<
+            CompletedEvent=CompletedEventT,
+            Output=Vec<u8>,
+            Error=<EventHandlerT as EventHandler>::Error,
         > + Clone
         + Send
         + Sync
         + 'static,
-    EventHandlerT: EventHandler<
-            InputEvent = EventT,
-            OutputEvent = CompletedEventT,
-            Error = crate::error::Error<Err>,
+        EventHandlerT: EventHandler<
+            InputEvent=EventT,
+            OutputEvent=CompletedEventT,
+            Error=crate::error::Error<Err>,
         > + Clone
         + Send
         + Sync
         + 'static,
-    CacheT: Cache<<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
-    OnAck: Fn(
+        CacheT: Cache<<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
+        OnAck: Fn(
             SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>,
             Result<String, String>,
         ) + Send
         + Sync
         + 'static,
-    OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
-    EmissionResult:
-        Future<Output = Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
+        OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
+        EmissionResult:
+        Future<Output=Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
 {
     let queue_url = queue_url.into();
     let dest_bucket = dest_bucket.into();
@@ -132,7 +132,7 @@ where
         sqs_completion_handler.clone(),
         tx,
     ))
-    .await;
+        .await;
 
     // info!("size of sqs_consumer {}", std::mem::size_of::<
     //     SqsConsumerActor<

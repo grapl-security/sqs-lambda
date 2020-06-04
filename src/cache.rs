@@ -29,7 +29,7 @@ pub enum CacheResponse {
 #[async_trait]
 pub trait Cache<E>
 where
-    E: Debug + Clone + Send + Sync + 'static,
+    E: Debug + Send + Sync + 'static,
 {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
@@ -41,7 +41,7 @@ where
 #[async_trait]
 pub trait ReadableCache<E>
 where
-    E: Debug + Clone + Send + Sync + 'static,
+    E: Debug + Send + Sync + 'static,
 {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
@@ -53,7 +53,7 @@ where
 impl<C, E> ReadableCache<E> for C
 where
     C: Cache<E> + Send + Sync + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    E: Debug + Send + Sync + 'static,
 {
     async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>
     where
@@ -69,7 +69,7 @@ pub struct NopCache {}
 #[async_trait]
 impl<E> Cache<E> for NopCache
 where
-    E: Debug + Clone + Send + Sync + 'static,
+    E: Debug + Send + Sync + 'static,
 {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,

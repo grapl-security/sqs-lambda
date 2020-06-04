@@ -7,6 +7,8 @@ use rusoto_sqs::Message as SqsMessage;
 use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
 use tokio::sync::mpsc::{channel, Sender};
 
+use tracing::instrument;
+
 use crate::consumer::Consumer;
 use async_trait::async_trait;
 

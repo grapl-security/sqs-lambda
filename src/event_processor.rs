@@ -11,6 +11,7 @@ use aktors::actor::Actor;
 use async_trait::async_trait;
 use std::marker::PhantomData;
 
+use tracing::instrument;
 #[derive(Copy, Clone, Debug)]
 pub enum ProcessorState {
     Started,
@@ -92,6 +93,7 @@ where
         + Clone
         + 'static,
 {
+    #[instrument(skip(self, event))]
     pub async fn process_event(&mut self, event: M) {
         // TODO: Handle errors
         info!("Processing event");
@@ -129,6 +131,7 @@ where
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn start_processing(&mut self) {
         self.state = ProcessorState::Started;
 
@@ -138,6 +141,7 @@ where
             .await;
     }
 
+    #[instrument(skip(self))]
     pub fn stop_processing(&mut self) {
         info!("stop_processing");
         self.state = ProcessorState::Complete;
@@ -186,6 +190,7 @@ where
         + Clone
         + 'static,
 {
+    #[instrument(skip(self, msg))]
     async fn route_message(&mut self, msg: EventProcessorMessage<M>) {
         match msg {
             EventProcessorMessage::process_event { event } => self.process_event(event).await,
@@ -245,6 +250,7 @@ impl<M> EventProcessorActor<M>
 where
     M: Send + Clone + Sync + 'static,
 {
+    #[instrument(skip(actor_impl))]
     pub fn new<C, EH, Input, Output, ER, CH>(
         mut actor_impl: EventProcessor<M, C, EH, Input, Output, ER, CH>,
     ) -> (Self, tokio::task::JoinHandle<()>)
@@ -301,6 +307,7 @@ where
         });
     }
 
+    #[instrument(skip(self, event))]
     pub async fn process_event(&self, event: M) {
         let msg = EventProcessorMessage::process_event { event };
 
@@ -322,6 +329,7 @@ where
         });
     }
 
+    #[instrument(skip(self))]
     pub async fn start_processing(&self) {
         let msg = EventProcessorMessage::start_processing {};
 
@@ -343,6 +351,7 @@ where
         });
     }
 
+    #[instrument(skip(self))]
     pub async fn stop_processing(&self) {
         let msg = EventProcessorMessage::stop_processing {};
 

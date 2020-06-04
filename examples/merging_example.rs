@@ -29,12 +29,13 @@ use sqs_lambda::event_decoder::PayloadDecoder;
 use sqs_lambda::event_handler::{Completion, EventHandler, OutputEvent};
 use sqs_lambda::local_sqs_service::local_sqs_service;
 use std::fmt::Debug;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 struct MyService<C, E>
 where
     C: Cache<E> + Clone + Send + Sync + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    E: Debug + Send + Sync + 'static,
 {
     cache: C,
     _p: std::marker::PhantomData<(E)>,
@@ -43,7 +44,7 @@ where
 impl<C, E> MyService<C, E>
 where
     C: Cache<E> + Clone + Send + Sync + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    E: Debug + Send + Sync + 'static,
 {
     pub fn new(cache: C) -> Self {
         Self {
@@ -57,7 +58,7 @@ where
 impl<C, E> EventHandler for MyService<C, E>
 where
     C: Cache<E> + Clone + Send + Sync + 'static,
-    E: Debug + Clone + Send + Sync + 'static,
+    E: Debug + Send + Sync + 'static,
 {
     type InputEvent = Vec<u8>;
     type OutputEvent = Subgraph;
@@ -68,8 +69,6 @@ where
         _input: Self::InputEvent,
     ) -> OutputEvent<Self::OutputEvent, Self::Error> {
         // do some work
-        println!("aerbpioajerobviajervoijaerv;oaiejrv;oaleirjn;aoerivjae;orivjaer;orivjaeraerkvao;ieljnva;eorivnmae;orinp
-        AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH");
         let mut completed: OutputEvent<Subgraph, SqsLambdaError<()>> =
             OutputEvent::new(Completion::Total(Subgraph {}));
 
@@ -217,9 +216,16 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    simple_logger::init_with_level(Level::Info).unwrap();
-    // let cache = RedisCache::new("address".to_owned()).await.expect("Could not create redis client");
+    let filter = EnvFilter::from_default_env();
+    tracing_subscriber::fmt()
+        // .json()
+        // .with_max_level(Level::DEBUG)
+        .with_env_filter(filter)
+        .init();
 
+    // simple_logger::init_with_level(Level::Info).unwrap();
+    // let cache = RedisCache::new("address".to_owned()).await.expect("Could not create redis client");
+    tracing::info!("Initializing service");
     let service: MyService<_, SqsLambdaError<()>> = MyService::new(NopCache {});
 
     local_sqs_service(
