@@ -91,6 +91,7 @@ where
 impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync + 'static>
     SqsConsumer<S, CH>
 {
+    #[instrument(skip(self))]
     pub async fn batch_get_events(
         &self,
         wait_time_seconds: i64,
@@ -116,6 +117,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
 impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync + 'static>
     SqsConsumer<S, CH>
 {
+    #[instrument(skip(self, event_processor))]
     pub async fn get_new_event(&mut self, event_processor: EventProcessorActor<SqsMessage>) {
         debug!("New event request");
         let should_consume = self.consume_policy.should_consume();
@@ -162,9 +164,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
             };
 
             event_processor.stop_processing().await;
-            event_processor.release().await;
-            self.completion_handler.clone().release().await;
-            self.self_actor.clone().unwrap().release().await;
+            drop(event_processor);
             return;
         }
 
@@ -192,6 +192,7 @@ where
     S: Sqs + Send + Sync + 'static,
     CH: CompletionHandler + Clone + Send + Sync + 'static,
 {
+    #[instrument(skip(self, event_processor))]
     async fn get_next_event(&self, event_processor: EventProcessorActor<SqsMessage>) {
         let msg = SqsConsumerMessage::get_new_event { event_processor };
         self.queue_len

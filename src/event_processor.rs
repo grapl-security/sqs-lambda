@@ -1,17 +1,18 @@
-use log::*;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tracing::{info, warn};
+use tokio::sync::mpsc::{channel, Sender};
 
 use crate::completion_handler::CompletionHandler;
 use crate::consumer::Consumer;
-use crate::event_handler::{Completion, EventHandler, OutputEvent};
+use crate::event_handler::{EventHandler, OutputEvent};
 use crate::event_retriever::PayloadRetriever;
 use std::fmt::Debug;
 
 use aktors::actor::Actor;
 use async_trait::async_trait;
-use std::marker::PhantomData;
 
 use tracing::instrument;
+use serde::export::Formatter;
+
 #[derive(Copy, Clone, Debug)]
 pub enum ProcessorState {
     Started,
@@ -42,6 +43,39 @@ where
     event_handler: EH,
     state: ProcessorState,
     self_actor: Option<EventProcessorActor<M>>,
+}
+
+impl<M, C, EH, Input, Output, ER, CH>  std::fmt::Debug for EventProcessor<M, C, EH, Input, Output, ER, CH>
+    where
+        M: Send + Clone + Sync + 'static,
+        C: Consumer<M> + Clone + Send + Sync + 'static,
+        EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
+        Input: Send + Clone + 'static,
+        Output: Send + Sync + Clone + 'static,
+        ER: PayloadRetriever<Input, Message = M> + Send + Sync + Clone + 'static,
+        CH: CompletionHandler<
+            Message = M,
+            CompletedEvent = OutputEvent<Output, <EH as EventHandler>::Error>,
+        > + Send
+        + Sync
+        + Clone
+        + 'static,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventProcessor")
+            .finish()
+    }
+}
+
+impl<M>  std::fmt::Debug for EventProcessorActor<M>
+    where
+        M: Send + Clone + Sync + 'static,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventProcessorActor")
+            .field("actor_name", &self.actor_name)
+            .finish()
+    }
 }
 
 impl<M, C, EH, Input, Output, ER, CH> EventProcessor<M, C, EH, Input, Output, ER, CH>
@@ -93,7 +127,7 @@ where
         + Clone
         + 'static,
 {
-    #[instrument(skip(self, event))]
+    #[instrument(skip(event))]
     pub async fn process_event(&mut self, event: M) {
         // TODO: Handle errors
         info!("Processing event");
@@ -131,7 +165,7 @@ where
         }
     }
 
-    #[instrument(skip(self))]
+    #[instrument]
     pub async fn start_processing(&mut self) {
         self.state = ProcessorState::Started;
 
@@ -141,7 +175,7 @@ where
             .await;
     }
 
-    #[instrument(skip(self))]
+    #[instrument]
     pub fn stop_processing(&mut self) {
         info!("stop_processing");
         self.state = ProcessorState::Complete;
@@ -156,20 +190,6 @@ where
     process_event { event: M },
     start_processing {},
     stop_processing {},
-    release,
-}
-
-impl<M> aktors::actor::Message for EventProcessorMessage<M>
-where
-    M: Send + Clone + Sync + 'static,
-{
-    fn is_release(&self) -> bool {
-        if let Self::release = self {
-            true
-        } else {
-            false
-        }
-    }
 }
 
 #[async_trait]
@@ -196,7 +216,6 @@ where
             EventProcessorMessage::process_event { event } => self.process_event(event).await,
             EventProcessorMessage::start_processing {} => self.start_processing().await,
             EventProcessorMessage::stop_processing {} => self.stop_processing(),
-            EventProcessorMessage::release => (),
         };
     }
 
@@ -294,20 +313,7 @@ where
         (self_actor, handle)
     }
 
-    pub async fn release(self) {
-        let msg = EventProcessorMessage::release;
-
-        let mut sender = self.sender.clone();
-
-        let queue_len = self.queue_len.clone();
-        queue_len.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        tokio::task::spawn(async move {
-            sender.send(msg).await;
-        });
-    }
-
-    #[instrument(skip(self, event))]
+    #[instrument(skip(event))]
     pub async fn process_event(&self, event: M) {
         let msg = EventProcessorMessage::process_event { event };
 
@@ -329,7 +335,7 @@ where
         });
     }
 
-    #[instrument(skip(self))]
+    #[instrument]
     pub async fn start_processing(&self) {
         let msg = EventProcessorMessage::start_processing {};
 
@@ -351,7 +357,7 @@ where
         });
     }
 
-    #[instrument(skip(self))]
+    #[instrument]
     pub async fn stop_processing(&self) {
         let msg = EventProcessorMessage::stop_processing {};
 

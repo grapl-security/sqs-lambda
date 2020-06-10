@@ -31,7 +31,6 @@ use sqs_lambda::local_sqs_service::local_sqs_service;
 use std::fmt::Debug;
 use tracing_subscriber::EnvFilter;
 
-#[derive(Clone)]
 struct MyService<C, E>
 where
     C: Cache<E> + Clone + Send + Sync + 'static,
@@ -39,6 +38,19 @@ where
 {
     cache: C,
     _p: std::marker::PhantomData<(E)>,
+}
+
+impl<C, E> Clone for MyService<C, E>
+    where
+        C: Cache<E> + Clone + Send + Sync + 'static,
+        E: Debug + Send + Sync + 'static,
+{
+    fn clone(&self) -> MyService<C, E> {
+        Self {
+            cache: self.cache.clone(),
+            _p: std::marker::PhantomData
+        }
+    }
 }
 
 impl<C, E> MyService<C, E>

@@ -1,25 +1,18 @@
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
-use color_eyre::Report;
 
-#[derive(Debug)]
-pub enum Error<PE>
-where
-    PE: Debug + Send + Sync + 'static,
+#[derive(thiserror::Error, Debug)]
+pub enum Error
 {
+    #[error("CacheError: {0}")]
     CacheError(String),
-    ProcessingError(PE),
+    #[error("ProcessingError: {0}")]
+    ProcessingError(String),
+    #[error("OnEmissionError: {0}")]
     OnEmissionError(String),
+    #[error("IoError: {0}")]
     IoError(String),
+    #[error("EncodeError: {0}")]
     EncodeError(String),
+    #[error("DecodeError: {0}")]
     DecodeError(String),
-}
-
-impl<PE> From<PE> for Error<PE>
-where
-    PE: Debug + Send + Sync + 'static,
-{
-    fn from(err: PE) -> Self {
-        Self::ProcessingError(err)
-    }
 }

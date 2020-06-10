@@ -35,8 +35,8 @@ fn time_based_key_fn(_event: &[u8]) -> String {
     format!("{}/{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
+#[tracing::instrument(skip(queue_url, dest_bucket, ctx, s3_client, sqs_client, event_decoder, event_encoder, event_handler, cache, on_ack, on_emit))]
 pub async fn local_sqs_service<
-    Err,
     S3T,
     SqsT,
     EventT,
@@ -62,7 +62,6 @@ pub async fn local_sqs_service<
     on_emit: OnEmission,
 ) -> Result<(), Box<dyn std::error::Error>>
     where
-        Err: Debug + Send + Sync + 'static,
         S3T: S3 + Clone + Send + Sync + 'static,
         SqsT: Sqs + Clone + Send + Sync + 'static,
         CompletedEventT: Clone + Send + Sync + 'static,
@@ -79,12 +78,12 @@ pub async fn local_sqs_service<
         EventHandlerT: EventHandler<
             InputEvent=EventT,
             OutputEvent=CompletedEventT,
-            Error=crate::error::Error<Err>,
+            Error=crate::error::Error,
         > + Clone
         + Send
         + Sync
         + 'static,
-        CacheT: Cache<<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
+        CacheT: Cache + Clone + Send + Sync + 'static,
         OnAck: Fn(
             SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>,
             Result<String, String>,
@@ -154,6 +153,10 @@ pub async fn local_sqs_service<
     info!("created event_processors");
 
     futures::future::join_all(event_processors.iter().map(|ep| ep.0.start_processing())).await;
+
+    drop(event_processors);
+    drop(sqs_consumer);
+    drop(sqs_completion_handler);
 
     sqs_consumer_handle.await;
     shutdown_notify.await;

@@ -27,35 +27,30 @@ pub enum CacheResponse {
 }
 
 #[async_trait]
-pub trait Cache<E>
-where
-    E: Debug + Send + Sync + 'static,
+pub trait Cache: Clone
 {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
         cacheable: CA,
-    ) -> Result<CacheResponse, crate::error::Error<E>>;
-    async fn store(&mut self, identity: Vec<u8>) -> Result<(), crate::error::Error<E>>;
+    ) -> Result<CacheResponse, crate::error::Error>;
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), crate::error::Error>;
 }
 
 #[async_trait]
-pub trait ReadableCache<E>
-where
-    E: Debug + Send + Sync + 'static,
+pub trait ReadableCache
 {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
         cacheable: CA,
-    ) -> Result<CacheResponse, crate::error::Error<E>>;
+    ) -> Result<CacheResponse, crate::error::Error>;
 }
 
 #[async_trait]
-impl<C, E> ReadableCache<E> for C
+impl<C> ReadableCache for C
 where
-    C: Cache<E> + Send + Sync + 'static,
-    E: Debug + Send + Sync + 'static,
+    C: Cache + Send + Sync + 'static,
 {
-    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>
+    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error>
     where
         CA: Cacheable + Send + Sync + 'static,
     {
@@ -67,17 +62,15 @@ where
 pub struct NopCache {}
 
 #[async_trait]
-impl<E> Cache<E> for NopCache
-where
-    E: Debug + Send + Sync + 'static,
+impl Cache for NopCache
 {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
         _cacheable: CA,
-    ) -> Result<CacheResponse, crate::error::Error<E>> {
+    ) -> Result<CacheResponse, crate::error::Error> {
         Ok(CacheResponse::Miss)
     }
-    async fn store(&mut self, _identity: Vec<u8>) -> Result<(), crate::error::Error<E>> {
+    async fn store(&mut self, _identity: Vec<u8>) -> Result<(), crate::error::Error> {
         Ok(())
     }
 }

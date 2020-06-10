@@ -13,20 +13,6 @@ where
     Error(E),
 }
 
-// impl<T, E> Clone for Completion<T, E>
-// where
-//     T: Clone + Send + Sync + 'static,
-//     E: Debug + Send + Sync + 'static,
-// {
-//     fn clone(&self) -> Self {
-//         match self {
-//             Completion::Total(t) => Completion::Total(t.clone()),
-//             Completion::Partial((t, e)) => Completion::Partial((t.clone(), e.clone())),
-//             Completion::Error(e) => Completion::Error(e.clone()),
-//         }
-//     }
-// }
-
 pub struct OutputEvent<T, E>
 where
     T: Clone + Send + Sync + 'static,
@@ -35,19 +21,6 @@ where
     pub completed_event: Completion<T, E>,
     pub identities: Vec<Vec<u8>>,
 }
-
-// impl<T, E> Clone for OutputEvent<T, E>
-// where
-//     T: Clone + Send + Sync + 'static,
-//     E: Debug + Send + Sync + 'static,
-// {
-//     fn clone(&self) -> Self {
-//         Self {
-//             completed_event: self.completed_event.clone(),
-//             identities: self.identities.clone(),
-//         }
-//     }
-// }
 
 impl<T, E> OutputEvent<T, E>
 where

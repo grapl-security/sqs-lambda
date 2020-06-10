@@ -3,9 +3,7 @@ use std::io::Read;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use aws_lambda_events::event::s3::S3Event;
-use futures::compat::Future01CompatExt;
-use log::*;
+use tracing::info;
 use rusoto_s3::{GetObjectRequest, S3};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::prelude::*;
@@ -13,7 +11,6 @@ use tokio::prelude::*;
 use async_trait::async_trait;
 
 use crate::event_decoder::PayloadDecoder;
-use rusoto_core::RusotoError;
 
 #[async_trait]
 pub trait PayloadRetriever<T> {
@@ -56,6 +53,7 @@ where
     E: Send + 'static,
 {
     type Message = SqsMessage;
+    #[tracing::instrument(skip(self, msg))]
     async fn retrieve_event(&mut self, msg: &Self::Message) -> Result<E, Box<dyn Error>> {
         let body = msg.body.as_ref().unwrap();
         info!("Got body from message: {}", body);
