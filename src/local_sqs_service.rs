@@ -35,8 +35,8 @@ fn time_based_key_fn(_event: &[u8]) -> String {
     format!("{}/{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
+#[tracing::instrument(skip(queue_url, dest_bucket, ctx, s3_client, sqs_client, event_decoder, event_encoder, event_handler, cache, on_ack, on_emit))]
 pub async fn local_sqs_service<
-    Err,
     S3T,
     SqsT,
     EventT,
@@ -61,39 +61,38 @@ pub async fn local_sqs_service<
     on_ack: OnAck,
     on_emit: OnEmission,
 ) -> Result<(), Box<dyn std::error::Error>>
-where
-    Err: Debug + Clone + Send + Sync + 'static,
-    S3T: S3 + Clone + Send + Sync + 'static,
-    SqsT: Sqs + Clone + Send + Sync + 'static,
-    CompletedEventT: Clone + Send + Sync + 'static,
-    EventT: Clone + Send + Sync + 'static,
-    EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
-    EventEncoderT: CompletionEventSerializer<
-            CompletedEvent = CompletedEventT,
-            Output = Vec<u8>,
-            Error = <EventHandlerT as EventHandler>::Error,
+    where
+        S3T: S3 + Clone + Send + Sync + 'static,
+        SqsT: Sqs + Clone + Send + Sync + 'static,
+        CompletedEventT: Clone + Send + Sync + 'static,
+        EventT: Clone + Send + Sync + 'static,
+        EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
+        EventEncoderT: CompletionEventSerializer<
+            CompletedEvent=CompletedEventT,
+            Output=Vec<u8>,
+            Error=<EventHandlerT as EventHandler>::Error,
         > + Clone
         + Send
         + Sync
         + 'static,
-    EventHandlerT: EventHandler<
-            InputEvent = EventT,
-            OutputEvent = CompletedEventT,
-            Error = crate::error::Error<Err>,
+        EventHandlerT: EventHandler<
+            InputEvent=EventT,
+            OutputEvent=CompletedEventT,
+            Error=crate::error::Error,
         > + Clone
         + Send
         + Sync
         + 'static,
-    CacheT: Cache<<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
-    OnAck: Fn(
+        CacheT: Cache + Clone + Send + Sync + 'static,
+        OnAck: Fn(
             SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>,
             Result<String, String>,
         ) + Send
         + Sync
         + 'static,
-    OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
-    EmissionResult:
-        Future<Output = Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
+        OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
+        EmissionResult:
+        Future<Output=Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
 {
     let queue_url = queue_url.into();
     let dest_bucket = dest_bucket.into();
@@ -132,7 +131,7 @@ where
         sqs_completion_handler.clone(),
         tx,
     ))
-    .await;
+        .await;
 
     // info!("size of sqs_consumer {}", std::mem::size_of::<
     //     SqsConsumerActor<
@@ -154,6 +153,10 @@ where
     info!("created event_processors");
 
     futures::future::join_all(event_processors.iter().map(|ep| ep.0.start_processing())).await;
+
+    drop(event_processors);
+    drop(sqs_consumer);
+    drop(sqs_completion_handler);
 
     sqs_consumer_handle.await;
     shutdown_notify.await;

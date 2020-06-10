@@ -62,6 +62,7 @@ where
     type Event = Vec<u8>;
     type Error = Box<dyn Error>;
 
+    #[tracing::instrument(skip(self, events))]
     async fn emit_event(&mut self, events: Vec<Self::Event>) -> Result<(), Self::Error> {
         for event in events {
             let key = (self.key_fn)(&event);

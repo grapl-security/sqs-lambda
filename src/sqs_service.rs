@@ -36,7 +36,6 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 }
 
 pub async fn sqs_service<
-    Err,
     S3T,
     SqsT,
     EventT,
@@ -63,7 +62,6 @@ pub async fn sqs_service<
     on_emit: OnEmission,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    Err: Debug + Clone + Send + Sync + 'static,
     S3T: S3 + Clone + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
     CompletedEventT: Clone + Send + Sync + 'static,
@@ -80,12 +78,12 @@ where
     EventHandlerT: EventHandler<
             InputEvent = EventT,
             OutputEvent = CompletedEventT,
-            Error = crate::error::Error<Err>,
+            Error = crate::error::Error,
         > + Clone
         + Send
         + Sync
         + 'static,
-    CacheT: Cache<<EventHandlerT as EventHandler>::Error> + Clone + Send + Sync + 'static,
+    CacheT: Cache + Clone + Send + Sync + 'static,
     OnAck: Fn(
             SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>,
             Result<String, String>,
@@ -155,6 +153,10 @@ where
         let next_proc = proc_iter.next().unwrap();
         next_proc.0.process_event(message).await;
     }
+
+    drop(event_processors);
+    drop(sqs_consumer);
+    drop(sqs_completion_handler);
 
     sqs_consumer_handle.await;
     shutdown_notify.await;

@@ -7,5 +7,4 @@ pub trait CompletionHandler {
 
     async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent);
     async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>);
-    async fn release(self);
 }

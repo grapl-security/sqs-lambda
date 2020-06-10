@@ -11,10 +11,18 @@ use async_trait::async_trait;
 
 use crate::cache::{Cache, CacheResponse, Cacheable};
 
-#[derive(Clone)]
 pub struct RedisCache {
     address: String,
     connection_pool: ConnectionPool,
+}
+
+impl Clone for RedisCache {
+    fn clone(&self) -> Self {
+        Self {
+            address: self.address.clone(),
+            connection_pool: self.connection_pool.clone(),
+        }
+    }
 }
 
 impl RedisCache {
@@ -30,11 +38,10 @@ impl RedisCache {
 }
 
 #[async_trait]
-impl<E> Cache<E> for RedisCache
-where
-    E: Debug + Clone + Send + Sync + 'static,
+impl Cache for RedisCache
 {
-    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error<E>>
+    #[tracing::instrument(skip(self, cacheable))]
+    async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error>
     where
         CA: Cacheable + Send + Sync + 'static,
     {
@@ -63,7 +70,8 @@ where
         }
     }
 
-    async fn store(&mut self, identity: Vec<u8>) -> Result<(), crate::error::Error<E>> {
+    #[tracing::instrument(skip(self, identity))]
+    async fn store(&mut self, identity: Vec<u8>) -> Result<(), crate::error::Error> {
         let identity = hex::encode(identity);
 
         let mut client = self.connection_pool.get().await;

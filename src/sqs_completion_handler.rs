@@ -59,8 +59,8 @@ where
         + Send
         + Sync
         + 'static,
-    CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    CacheT: Cache + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
     sqs_client: SqsT,
     queue_url: String,
@@ -92,8 +92,8 @@ where
         + Send
         + Sync
         + 'static,
-    CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    CacheT: Cache + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
     pub fn new(
         sqs_client: SqsT,
@@ -137,9 +137,10 @@ where
         + Send
         + Sync
         + 'static,
-    CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    CacheT: Cache + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
+    #[tracing::instrument(skip(self, completed))]
     pub async fn mark_complete(
         &mut self,
         sqs_message: SqsMessage,
@@ -177,6 +178,7 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self, notify))]
     pub async fn ack_all(&mut self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
         debug!("Flushing completed events");
 
@@ -273,7 +275,7 @@ where
 pub enum SqsCompletionHandlerMessage<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     mark_complete {
@@ -286,7 +288,6 @@ where
     _p {
         _p: std::marker::PhantomData<(SqsT)>,
     },
-    release,
 }
 
 #[async_trait]
@@ -307,16 +308,16 @@ where
         + Send
         + Sync
         + 'static,
-    CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
-    ProcErr: Debug + Clone + Send + Sync + 'static,
+    CacheT: Cache + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
 {
+    #[tracing::instrument(skip(self, msg))]
     async fn route_message(&mut self, msg: SqsCompletionHandlerMessage<CE, ProcErr, SqsT>) {
         match msg {
             SqsCompletionHandlerMessage::mark_complete { msg, completed } => {
                 self.mark_complete(msg, completed).await
             }
             SqsCompletionHandlerMessage::ack_all { notify } => self.ack_all(notify).await,
-            SqsCompletionHandlerMessage::release {} => (),
             SqsCompletionHandlerMessage::_p { .. } => (),
         };
     }
@@ -333,7 +334,7 @@ where
 pub struct SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     sender: Sender<SqsCompletionHandlerMessage<CE, ProcErr, SqsT>>,
@@ -347,7 +348,7 @@ where
 impl<CE, ProcErr, SqsT> Clone for SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
@@ -374,7 +375,7 @@ where
 impl<CE, ProcErr, SqsT> SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     pub fn new<CPE, CP, Payload, EE, OA, CacheT>(
@@ -393,7 +394,7 @@ where
             + Send
             + Sync
             + 'static,
-        CacheT: Cache<ProcErr> + Send + Sync + Clone + 'static,
+        CacheT: Cache + Send + Sync + Clone + 'static,
     {
         let (sender, receiver) = channel(1);
         let inner_rc = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(1));
@@ -418,26 +419,6 @@ where
         )));
 
         (self_actor, handle)
-    }
-
-    pub async fn release(self) {
-        let msg = SqsCompletionHandlerMessage::release;
-        let mut sender = self.sender.clone();
-
-        let queue_len = self.queue_len.clone();
-        queue_len.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        tokio::task::spawn(async move {
-            if let Err(e) = sender.send(msg).await {
-                panic!(
-                    concat!(
-                        "Receiver has failed with {}, propagating error. ",
-                        stringify!(#ident)
-                    ),
-                    e
-                )
-            }
-        });
     }
 
     pub async fn mark_complete(&self, msg: SqsMessage, completed: OutputEvent<CE, ProcErr>) {
@@ -494,7 +475,7 @@ where
 impl<CE, ProcErr, SqsT> Drop for SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     fn drop(&mut self) {
@@ -508,7 +489,7 @@ where
 impl<CE, ProcErr, SqsT> CompletionHandler for SqsCompletionHandlerActor<CE, ProcErr, SqsT>
 where
     CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
+    ProcErr: Debug + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
 {
     type Message = SqsMessage;
@@ -520,24 +501,5 @@ where
 
     async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
         SqsCompletionHandlerActor::ack_all(self, notify).await
-    }
-
-    async fn release(self) {
-        SqsCompletionHandlerActor::release(self).await
-    }
-}
-
-impl<CE, ProcErr, SqsT> aktors::actor::Message for SqsCompletionHandlerMessage<CE, ProcErr, SqsT>
-where
-    CE: Send + Sync + Clone + 'static,
-    ProcErr: Debug + Send + Sync + Clone + 'static,
-    SqsT: Sqs + Clone + Send + Sync + 'static,
-{
-    fn is_release(&self) -> bool {
-        if let Self::release = self {
-            true
-        } else {
-            false
-        }
     }
 }
