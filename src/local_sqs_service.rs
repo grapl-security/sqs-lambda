@@ -35,9 +35,10 @@ fn time_based_key_fn(_event: &[u8]) -> String {
     format!("{}/{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
-#[tracing::instrument(skip(queue_url, dest_bucket, ctx, s3_client, sqs_client, event_decoder, event_encoder, event_handler, cache, on_ack, on_emit))]
+#[tracing::instrument(skip(queue_url, dest_bucket, ctx, s3_init, s3_client, sqs_client, event_decoder, event_encoder, event_handler, cache, on_ack, on_emit))]
 pub async fn local_sqs_service<
     S3T,
+    SInit,
     SqsT,
     EventT,
     CompletedEventT,
@@ -52,6 +53,7 @@ pub async fn local_sqs_service<
     queue_url: impl Into<String>,
     dest_bucket: impl Into<String>,
     ctx: lambda_runtime::Context,
+    s3_init: SInit,
     s3_client: S3T,
     sqs_client: SqsT,
     event_decoder: EventDecoderT,
@@ -62,6 +64,7 @@ pub async fn local_sqs_service<
     on_emit: OnEmission,
 ) -> Result<(), Box<dyn std::error::Error>>
     where
+        SInit: (Fn(String) -> S3T) + Clone + Send + Sync + 'static,
         S3T: S3 + Clone + Send + Sync + 'static,
         SqsT: Sqs + Clone + Send + Sync + 'static,
         CompletedEventT: Clone + Send + Sync + 'static,
@@ -146,7 +149,7 @@ pub async fn local_sqs_service<
                 sqs_consumer.clone(),
                 sqs_completion_handler.clone(),
                 event_handler.clone(),
-                S3PayloadRetriever::new(s3_client.clone(), event_decoder.clone()),
+                S3PayloadRetriever::new(s3_init.clone(), event_decoder.clone()),
             ))
         })
         .collect();

@@ -37,6 +37,7 @@ fn time_based_key_fn(_event: &[u8]) -> String {
 
 pub async fn sqs_service<
     S3T,
+    SInit,
     SqsT,
     EventT,
     CompletedEventT,
@@ -52,6 +53,7 @@ pub async fn sqs_service<
     initial_messages: impl IntoIterator<Item = rusoto_sqs::Message>,
     dest_bucket: impl Into<String>,
     ctx: lambda_runtime::Context,
+    s3_init: SInit,
     s3_client: S3T,
     sqs_client: SqsT,
     event_decoder: EventDecoderT,
@@ -63,6 +65,7 @@ pub async fn sqs_service<
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     S3T: S3 + Clone + Send + Sync + 'static,
+    SInit: (Fn(String) -> S3T) + Clone + Send + Sync + 'static,
     SqsT: Sqs + Clone + Send + Sync + 'static,
     CompletedEventT: Clone + Send + Sync + 'static,
     EventT: Clone + Send + Sync + 'static,
@@ -141,7 +144,7 @@ where
                 sqs_consumer.clone(),
                 sqs_completion_handler.clone(),
                 event_handler.clone(),
-                S3PayloadRetriever::new(s3_client.clone(), event_decoder.clone()),
+                S3PayloadRetriever::new(s3_init.clone(), event_decoder.clone()),
             ))
         })
         .collect();

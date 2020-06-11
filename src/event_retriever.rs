@@ -11,6 +11,7 @@ use tokio::prelude::*;
 use async_trait::async_trait;
 
 use crate::event_decoder::PayloadDecoder;
+use std::collections::HashMap;
 
 #[async_trait]
 pub trait PayloadRetriever<T> {
@@ -19,36 +20,52 @@ pub trait PayloadRetriever<T> {
 }
 
 #[derive(Clone)]
-pub struct S3PayloadRetriever<S, D, E>
+pub struct S3PayloadRetriever<S, SInit, D, E>
 where
     S: S3 + Clone + Send + Sync + 'static,
+    SInit: (Fn(String) -> S) + Clone + Send + Sync + 'static,
     D: PayloadDecoder<E> + Clone + Send + 'static,
     E: Send + 'static,
 {
-    s3: S,
+    s3_init: SInit,
+    s3_clients: HashMap<String, S>,
     decoder: D,
     phantom: PhantomData<E>,
 }
 
-impl<S, D, E> S3PayloadRetriever<S, D, E>
+impl<S, SInit, D, E> S3PayloadRetriever<S, SInit, D, E>
 where
     S: S3 + Clone + Send + Sync + 'static,
+    SInit: (Fn(String) -> S) + Clone + Send + Sync + 'static,
     D: PayloadDecoder<E> + Clone + Send + 'static,
     E: Send + 'static,
 {
-    pub fn new(s3: S, decoder: D) -> Self {
+    pub fn new(s3: SInit, decoder: D) -> Self {
         Self {
-            s3,
+            s3_init: s3,
+            s3_clients: HashMap::new(),
             decoder,
             phantom: PhantomData,
+        }
+    }
+
+    pub fn get_client(&mut self, region: String) -> S {
+        match self.s3_clients.get(&region) {
+            Some(s3) => s3.clone(),
+            None => {
+                let client = (self.s3_init)(region.clone());
+                self.s3_clients.insert(region.to_string(), client.clone());
+                client
+            }
         }
     }
 }
 
 #[async_trait]
-impl<S, D, E> PayloadRetriever<E> for S3PayloadRetriever<S, D, E>
+impl<S, SInit, D, E> PayloadRetriever<E> for S3PayloadRetriever<S, SInit, D, E>
 where
     S: S3 + Clone + Send + Sync + 'static,
+    SInit: (Fn(String) -> S) + Clone + Send + Sync + 'static,
     D: PayloadDecoder<E> + Clone + Send + 'static,
     E: Send + 'static,
 {
@@ -60,21 +77,21 @@ where
         let event: serde_json::Value = serde_json::from_str(body)?;
 
         let record = &event["Records"][0]["s3"];
-        // let record = &event.records[0].s3;
 
         let bucket = record["bucket"]["name"].as_str().expect("bucket name");
         let key = record["object"]["key"].as_str().expect("object key");
 
         println!("{}/{}", bucket, key);
 
-        let s3_data = self.s3.get_object(GetObjectRequest {
+        let region = &event["Records"][0]["awsRegion"].as_str().expect("region");
+        let s3 = self.get_client(region.to_string());
+        let s3_data = s3.get_object(GetObjectRequest {
             bucket: bucket.to_string(),
             key: key.to_string(),
             ..Default::default()
         });
 
         let s3_data = tokio::time::timeout(Duration::from_secs(5), s3_data).await??;
-        // .with_timeout(Duration::from_secs(2)).compat().await?;
 
         let object_size = record["object"]["size"].as_u64().unwrap_or_default();
         let prealloc = if object_size < 1024 {

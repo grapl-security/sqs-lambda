@@ -31,57 +31,54 @@ use sqs_lambda::local_sqs_service::local_sqs_service;
 use std::fmt::Debug;
 use tracing_subscriber::EnvFilter;
 
-struct MyService<C, E>
+struct MyService<C>
 where
-    C: Cache<E> + Clone + Send + Sync + 'static,
-    E: Debug + Send + Sync + 'static,
+    C: Cache + Clone + Send + Sync + 'static,
+    
 {
     cache: C,
-    _p: std::marker::PhantomData<(E)>,
 }
 
-impl<C, E> Clone for MyService<C, E>
+impl<C> Clone for MyService<C>
     where
-        C: Cache<E> + Clone + Send + Sync + 'static,
-        E: Debug + Send + Sync + 'static,
+        C: Cache + Clone + Send + Sync + 'static,
+        
 {
-    fn clone(&self) -> MyService<C, E> {
+    fn clone(&self) -> MyService<C> {
         Self {
             cache: self.cache.clone(),
-            _p: std::marker::PhantomData
         }
     }
 }
 
-impl<C, E> MyService<C, E>
+impl<C> MyService<C>
 where
-    C: Cache<E> + Clone + Send + Sync + 'static,
-    E: Debug + Send + Sync + 'static,
+    C: Cache + Clone + Send + Sync + 'static,
+    
 {
     pub fn new(cache: C) -> Self {
         Self {
             cache,
-            _p: std::marker::PhantomData,
         }
     }
 }
 
 #[async_trait]
-impl<C, E> EventHandler for MyService<C, E>
+impl<C> EventHandler for MyService<C>
 where
-    C: Cache<E> + Clone + Send + Sync + 'static,
-    E: Debug + Send + Sync + 'static,
+    C: Cache + Clone + Send + Sync + 'static,
+    
 {
     type InputEvent = Vec<u8>;
     type OutputEvent = Subgraph;
-    type Error = SqsLambdaError<()>;
+    type Error = SqsLambdaError;
 
     async fn handle_event(
         &mut self,
         _input: Self::InputEvent,
     ) -> OutputEvent<Self::OutputEvent, Self::Error> {
         // do some work
-        let mut completed: OutputEvent<Subgraph, SqsLambdaError<()>> =
+        let mut completed =
             OutputEvent::new(Completion::Total(Subgraph {}));
 
         // for input in _input.keys() {
@@ -111,7 +108,7 @@ pub struct SubgraphSerializer {}
 impl CompletionEventSerializer for SubgraphSerializer {
     type CompletedEvent = Subgraph;
     type Output = Vec<u8>;
-    type Error = SqsLambdaError<()>;
+    type Error = SqsLambdaError;
 
     fn serialize_completed_events(
         &mut self,
@@ -238,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // simple_logger::init_with_level(Level::Info).unwrap();
     // let cache = RedisCache::new("address".to_owned()).await.expect("Could not create redis client");
     tracing::info!("Initializing service");
-    let service: MyService<_, SqsLambdaError<()>> = MyService::new(NopCache {});
+    let service = MyService::new(NopCache {});
 
     local_sqs_service(
         "http://localhost:9324/queue/sysmon-graph-generator-queue",
@@ -247,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             deadline: Utc::now().timestamp_millis() + 300_000,
             ..Default::default()
         },
+        |_| init_s3_client(),
         init_s3_client(),
         init_sqs_client(),
         ZstdJsonDecoder { buffer: vec![] },
