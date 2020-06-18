@@ -140,6 +140,23 @@ where
     CacheT: Cache + Send + Sync + Clone + 'static,
     ProcErr: Debug + Send + Sync + 'static,
 {
+
+    #[tracing::instrument(skip(self))]
+    pub async fn ack_message(
+        &mut self,
+        sqs_message: SqsMessage,
+    ) {
+        self.completed_messages.push(sqs_message);
+        if self
+            .completion_policy
+            .should_flush(self.completed_events.len() as u16)
+        {
+            self.ack_all(None).await;
+            self.completion_policy.set_last_flush();
+        }
+    }
+
+
     #[tracing::instrument(skip(self, completed))]
     pub async fn mark_complete(
         &mut self,
@@ -282,6 +299,9 @@ where
         msg: SqsMessage,
         completed: OutputEvent<CE, ProcErr>,
     },
+    ack_message {
+        msg: SqsMessage,
+    },
     ack_all {
         notify: Option<tokio::sync::oneshot::Sender<()>>,
     },
@@ -318,6 +338,7 @@ where
                 self.mark_complete(msg, completed).await
             }
             SqsCompletionHandlerMessage::ack_all { notify } => self.ack_all(notify).await,
+            SqsCompletionHandlerMessage::ack_message { msg } => self.ack_message(msg).await,
             SqsCompletionHandlerMessage::_p { .. } => (),
         };
     }
@@ -440,6 +461,27 @@ where
             }
         });
     }
+
+    pub async fn ack_message(&self, msg: SqsMessage) {
+        let msg = SqsCompletionHandlerMessage::ack_message { msg  };
+        let mut sender = self.sender.clone();
+
+        let queue_len = self.queue_len.clone();
+        queue_len.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        tokio::task::spawn(async move {
+            if let Err(e) = sender.send(msg).await {
+                panic!(
+                    concat!(
+                    "Receiver has failed with {}, propagating error. ",
+                    "SqsCompletionHandler"
+                    ),
+                    e
+                )
+            }
+        });
+    }
+
     async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>) {
         let msg = SqsCompletionHandlerMessage::ack_all { notify };
         let mut sender = self.sender.clone();
@@ -497,6 +539,10 @@ where
 
     async fn mark_complete(&self, msg: Self::Message, completed_event: Self::CompletedEvent) {
         SqsCompletionHandlerActor::mark_complete(self, msg, completed_event).await
+    }
+
+    async fn ack_message(&self, msg: Self::Message) {
+        SqsCompletionHandlerActor::ack_message(self, msg).await
     }
 
     async fn ack_all(&self, notify: Option<tokio::sync::oneshot::Sender<()>>) {

@@ -131,10 +131,21 @@ where
     pub async fn process_event(&mut self, event: M) {
         // TODO: Handle errors
         info!("Processing event");
+
+        let mut unsupported = false;
+
         let retrieved_event = match self.event_retriever.retrieve_event(&event).await {
-            Ok(retrieved_event) => {
+            Ok(event @ Some(_)) => {
                 info!("Retrieved event");
-                Some(retrieved_event)
+                event
+            }
+            Ok(None) => {
+                // ack this event as it's unsupported and does not require processing
+                // self.completion_handler
+                //     .ack_message(event.clone())
+                //     .await;
+                unsupported = true;
+                None
             }
             Err(e) => {
                 warn!("Failed to retrieve event with: {:?}", e);
@@ -150,7 +161,15 @@ where
             self.completion_handler
                 .mark_complete(event, output_event)
                 .await;
+        } else {
+            if unsupported {
+                // ack this event as it's unsupported and does not require processing
+                self.completion_handler
+                    .ack_message(event)
+                    .await;
+            }
         }
+
 
         info!("self.processor_state {:?}", self.state);
         if let ProcessorState::Started = self.state {

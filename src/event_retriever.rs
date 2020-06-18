@@ -16,7 +16,7 @@ use std::collections::HashMap;
 #[async_trait]
 pub trait PayloadRetriever<T> {
     type Message;
-    async fn retrieve_event(&mut self, msg: &Self::Message) -> Result<T, Box<dyn Error>>;
+    async fn retrieve_event(&mut self, msg: &Self::Message) -> Result<Option<T>, Box<dyn Error>>;
 }
 
 #[derive(Clone)]
@@ -71,11 +71,16 @@ where
 {
     type Message = SqsMessage;
     #[tracing::instrument(skip(self, msg))]
-    async fn retrieve_event(&mut self, msg: &Self::Message) -> Result<E, Box<dyn Error>> {
+    async fn retrieve_event(&mut self, msg: &Self::Message) -> Result<Option<E>, Box<dyn Error>> {
         let body = msg.body.as_ref().unwrap();
         info!("Got body from message: {}", body);
         let event: serde_json::Value = serde_json::from_str(body)?;
 
+        if let Some(Some(event_str)) = event.get("Event").map(serde_json::Value::as_str) {
+            if event_str == "s3:TestEvent" {
+                return Ok(None)
+            }
+        }
         let record = &event["Records"][0]["s3"];
 
         let bucket = record["bucket"]["name"].as_str().expect("bucket name");
@@ -112,6 +117,6 @@ where
             .await?;
 
         info!("Read s3 payload body");
-        self.decoder.decode(body)
+        self.decoder.decode(body).map(Option::from)
     }
 }
