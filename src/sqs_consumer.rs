@@ -16,26 +16,43 @@ use crate::completion_handler::CompletionHandler;
 use crate::event_processor::EventProcessorActor;
 use aktors::actor::Actor;
 use std::marker::PhantomData;
+use chrono::Utc;
 
 pub struct ConsumePolicy {
-    context: Context,
+    deadline: i64,
     stop_at: Duration,
     max_empty_receives: u16,
     empty_receives: u16,
 }
 
+pub trait IntoDeadline {
+    fn into_deadline(self) -> i64;
+}
+
+impl IntoDeadline for Context {
+    fn into_deadline(self) -> i64 { self.deadline }
+}
+
+impl IntoDeadline for i64 {
+    fn into_deadline(self) -> i64 { self }
+}
+
 impl ConsumePolicy {
-    pub fn new(context: Context, stop_at: Duration, max_empty_receives: u16) -> Self {
+    pub fn new(deadline: impl IntoDeadline, stop_at: Duration, max_empty_receives: u16) -> Self {
         Self {
-            context,
+            deadline: deadline.into_deadline(),
             stop_at,
             max_empty_receives,
             empty_receives: 0,
         }
     }
 
+    pub fn get_time_remaining_millis(&self) -> i64 {
+        self.deadline - Utc::now().timestamp_millis()
+    }
+
     pub fn should_consume(&self) -> bool {
-        (self.stop_at.as_millis() <= self.context.get_time_remaining_millis() as u128)
+        (self.stop_at.as_millis() <= self.get_time_remaining_millis() as u128)
             && self.empty_receives <= self.max_empty_receives
     }
 
@@ -133,6 +150,10 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
                         .unwrap()
                         .get_next_event(event_processor)
                         .await;
+
+                    // Register the empty receive on error
+                    self.consume_policy
+                        .register_received(false);
                     return;
                 }
             };

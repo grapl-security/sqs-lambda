@@ -136,12 +136,6 @@ pub async fn local_sqs_service<
     ))
         .await;
 
-    // info!("size of sqs_consumer {}", std::mem::size_of::<
-    //     SqsConsumerActor<
-    //         SqsT,
-    //         SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>
-    // >>());
-    //
     let event_processors: Vec<_> = (0..1)
         .into_iter()
         .map(|_| {
@@ -162,6 +156,11 @@ pub async fn local_sqs_service<
     drop(sqs_completion_handler);
 
     sqs_consumer_handle.await;
+    sqs_completion_handle.await;
+
     shutdown_notify.await;
+
+    info!("Delaying");
+    tokio::time::delay_for(Duration::from_secs(15)).await;
     Ok(())
 }

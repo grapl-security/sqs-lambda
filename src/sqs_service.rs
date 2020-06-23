@@ -103,7 +103,7 @@ where
 
     let consume_policy = ConsumePolicy::new(
         ctx,                    // Use the Context.deadline from the lambda_runtime
-        Duration::from_secs(5), // Stop consuming when there's 10 seconds left in the runtime
+        Duration::from_secs(10), // Stop consuming when there's N seconds left in the runtime
         3,                      // Maximum of 3 empty receives before we stop
     );
 
