@@ -16,7 +16,7 @@ use crate::s3_event_emitter::S3EventEmitter;
 use crate::sqs_completion_handler::{
     CompletionPolicy, SqsCompletionHandler, SqsCompletionHandlerActor,
 };
-use crate::sqs_consumer::{ConsumePolicy, SqsConsumer, SqsConsumerActor};
+use crate::sqs_consumer::{ConsumePolicy, SqsConsumer, SqsConsumerActor, IntoDeadline};
 use aws_lambda_events::event::s3::{
     S3Bucket, S3Entity, S3Event, S3EventRecord, S3Object, S3RequestParameters, S3UserIdentity,
 };
@@ -35,7 +35,7 @@ fn time_based_key_fn(_event: &[u8]) -> String {
     format!("{}/{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
-#[tracing::instrument(skip(queue_url, dest_bucket, ctx, s3_init, s3_client, sqs_client, event_decoder, event_encoder, event_handler, cache, on_ack, on_emit))]
+#[tracing::instrument(skip(queue_url, dest_bucket, deadline, s3_init, s3_client, sqs_client, event_decoder, event_encoder, event_handler, cache, on_ack, on_emit))]
 pub async fn local_sqs_service<
     S3T,
     SInit,
@@ -52,7 +52,7 @@ pub async fn local_sqs_service<
 >(
     queue_url: impl Into<String>,
     dest_bucket: impl Into<String>,
-    ctx: lambda_runtime::Context,
+    deadline: impl IntoDeadline,
     s3_init: SInit,
     s3_client: S3T,
     sqs_client: SqsT,
@@ -101,7 +101,7 @@ pub async fn local_sqs_service<
     let dest_bucket = dest_bucket.into();
 
     let consume_policy = ConsumePolicy::new(
-        ctx,                    // Use the Context.deadline from the lambda_runtime
+        deadline,                    // Use the Context.deadline from the lambda_runtime
         Duration::from_secs(5), // Stop consuming when there's N seconds left in the runtime
         300,                    // Maximum of 3 empty receives before we stop
     );
