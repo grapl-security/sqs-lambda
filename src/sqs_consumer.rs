@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures::compat::Future01CompatExt;
 use lambda_runtime::Context;
-use log::{debug, warn};
+use log::{debug, error, warn};
 use rusoto_sqs::Message as SqsMessage;
 use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
 use tokio::sync::mpsc::{channel, Sender};
