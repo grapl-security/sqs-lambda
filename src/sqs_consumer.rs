@@ -143,7 +143,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
             let new_events = match self.batch_get_events(1).await {
                 Ok(new_events) => new_events,
                 Err(e) => {
-                    warn!("Failed to get new events with: {:?}", e);
+                    error!("Failed to get new events with: {:?}", e);
                     tokio::time::delay_for(Duration::from_secs(1)).await;
                     self.self_actor
                         .clone()
@@ -181,7 +181,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
                 Some(shutdown_subscriber) => {
                     shutdown_subscriber.send(()).unwrap();
                 }
-                None => warn!("Attempted to shut down with empty shutdown_subscriber"),
+                None => debug!("Attempted to shut down with empty shutdown_subscriber"),
             };
 
             event_processor.stop_processing().await;
