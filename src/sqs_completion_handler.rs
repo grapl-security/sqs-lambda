@@ -489,7 +489,7 @@ where
         tokio::task::spawn(async move {
             if let Err(e) = sender.send(msg).await {
                 panic!(
-                        "Receiver has failed with {}, propagating error. SqsCompletionHandler"
+                        "Receiver has failed with {}, propagating error. SqsCompletionHandler",
                     e
                 )
             }
