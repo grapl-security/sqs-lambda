@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use futures::compat::Future01CompatExt;
 use log::*;
-use rusoto_sqs::Message as SqsMessage;
+use rusoto_sqs::{Message as SqsMessage, DeleteMessageBatchError};
 use rusoto_sqs::{DeleteMessageBatchRequest, DeleteMessageBatchRequestEntry, Sqs, SqsClient};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -15,6 +15,8 @@ use aktors::actor::Actor;
 use async_trait::async_trait;
 
 use crate::completion_handler::CompletionHandler;
+use color_eyre::Help;
+use rusoto_core::RusotoError;
 
 pub struct CompletionPolicy {
     max_messages: u16,
@@ -120,6 +122,30 @@ where
         }
     }
 }
+
+async fn retry<F, T, E>(max_tries: u32, f: impl Fn() -> F) -> color_eyre::Result<T>
+where
+    T: Send,
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut backoff = 2;
+    let mut errs: Result<T, _> = Err(eyre::eyre!("wait_loop failed"));
+    for i in 0..max_tries {
+        match (f)().await {
+            Ok(t) => return Ok(t),
+            Err(e) => {
+                errs = errs.error(e);
+            }
+        };
+
+        tokio::time::delay_for(Duration::from_millis(backoff)).await;
+        backoff *= i as u64;
+    }
+
+    errs
+}
+
 
 impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr>
     SqsCompletionHandler<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr>
@@ -234,7 +260,7 @@ where
                 .map(|msg| msg.message_id.clone().unwrap())
                 .collect();
 
-            let entries = chunk
+            let entries: Vec<_> = chunk
                 .iter()
                 .map(|msg| DeleteMessageBatchRequestEntry {
                     id: msg.message_id.clone().unwrap(),
@@ -242,14 +268,16 @@ where
                 })
                 .collect();
 
-            let dmb = self
-                .sqs_client
-                .delete_message_batch(DeleteMessageBatchRequest {
-                    entries,
-                    queue_url: self.queue_url.clone(),
-                });
+            match retry(10, || async {
 
-            match tokio::time::timeout(Duration::from_millis(10), dmb).await {
+                let dmb = self.sqs_client
+                    .delete_message_batch(DeleteMessageBatchRequest {
+                        entries: entries.clone(),
+                        queue_url: self.queue_url.clone(),
+                    });
+
+                tokio::time::timeout(Duration::from_millis(250), dmb).await
+            }).await {
                 Ok(dmb) => acks.push((dmb, msg_ids)),
                 Err(e) => warn!("Failed to delete message, timed out: {:?}", e),
             };
