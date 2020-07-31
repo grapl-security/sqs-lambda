@@ -112,7 +112,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
     pub async fn batch_get_events(
         &self,
         wait_time_seconds: i64,
-    ) -> Result<Vec<SqsMessage>, rusoto_core::RusotoError<ReceiveMessageError>> {
+    ) -> eyre::Result<Vec<SqsMessage>> {
         debug!("Calling receive_message");
         let recv = self.sqs_client.receive_message(ReceiveMessageRequest {
             max_number_of_messages: Some(10),
@@ -121,9 +121,8 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
             ..Default::default()
         });
 
-        let recv = tokio::time::timeout(Duration::from_secs(wait_time_seconds as u64 + 2), recv)
-            .await
-            .expect("batch_get_events timed out")?;
+        let recv = tokio::time::timeout(Duration::from_secs(wait_time_seconds as u64 + 20), recv)
+            .await??;
         debug!("Called receive_message : {:?}", recv);
 
         Ok(recv.messages.unwrap_or(vec![]))

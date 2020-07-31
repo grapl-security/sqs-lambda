@@ -111,6 +111,7 @@ where
     }
 }
 
+
 impl<M, C, EH, Input, Output, ER, CH> EventProcessor<M, C, EH, Input, Output, ER, CH>
 where
     M: Send + Clone + Sync + 'static,
