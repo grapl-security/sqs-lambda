@@ -1,26 +1,21 @@
-use std::fmt::Debug;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::info;
 use rusoto_s3::S3;
 use rusoto_sqs::{SendMessageRequest, Sqs, SqsClient};
 
-use crate::cache::{Cache, NopCache};
+use crate::cache::Cache;
 use crate::completion_event_serializer::CompletionEventSerializer;
 use crate::event_decoder::PayloadDecoder;
-use crate::event_handler;
-use crate::event_handler::{EventHandler, OutputEvent};
+
+use crate::event_handler::EventHandler;
 use crate::event_processor::{EventProcessor, EventProcessorActor};
 use crate::event_retriever::S3PayloadRetriever;
+use crate::local_sqs_service_options::{LocalSqsServiceOptions, LocalSqsServiceOptionsBuilder};
 use crate::s3_event_emitter::S3EventEmitter;
-use crate::sqs_completion_handler::{
-    CompletionPolicy, SqsCompletionHandler, SqsCompletionHandlerActor,
-};
-use crate::sqs_consumer::{ConsumePolicy, SqsConsumer, SqsConsumerActor, IntoDeadline};
-use aws_lambda_events::event::s3::{
-    S3Bucket, S3Entity, S3Event, S3EventRecord, S3Object, S3RequestParameters, S3UserIdentity,
-};
-use rusoto_core::Region;
+use crate::sqs_completion_handler::{SqsCompletionHandler, SqsCompletionHandlerActor};
+use crate::sqs_consumer::{ConsumePolicy, IntoDeadline, SqsConsumer, SqsConsumerActor};
+
 use std::error::Error;
 use std::future::Future;
 
@@ -35,8 +30,22 @@ fn time_based_key_fn(_event: &[u8]) -> String {
     format!("{}/{}-{}", cur_day, cur_ms, uuid::Uuid::new_v4())
 }
 
-#[tracing::instrument(skip(queue_url, dest_bucket, deadline, s3_init, s3_client, sqs_client, event_decoder, event_encoder, event_handler, cache, on_ack, on_emit))]
-pub async fn local_sqs_service<
+#[tracing::instrument(skip(
+    queue_url,
+    dest_bucket,
+    deadline,
+    s3_init,
+    s3_client,
+    sqs_client,
+    event_decoder,
+    event_encoder,
+    event_handler,
+    cache,
+    on_ack,
+    on_emit,
+    options
+))]
+pub async fn local_sqs_service_with_options<
     S3T,
     SInit,
     SqsT,
@@ -62,46 +71,47 @@ pub async fn local_sqs_service<
     cache: CacheT,
     on_ack: OnAck,
     on_emit: OnEmission,
+    options: LocalSqsServiceOptions,
 ) -> Result<(), Box<dyn std::error::Error>>
-    where
-        SInit: (Fn(String) -> S3T) + Clone + Send + Sync + 'static,
-        S3T: S3 + Clone + Send + Sync + 'static,
-        SqsT: Sqs + Clone + Send + Sync + 'static,
-        CompletedEventT: Clone + Send + Sync + 'static,
-        EventT: Clone + Send + Sync + 'static,
-        EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
-        EventEncoderT: CompletionEventSerializer<
-            CompletedEvent=CompletedEventT,
-            Output=Vec<u8>,
-            Error=<EventHandlerT as EventHandler>::Error,
+where
+    SInit: (Fn(String) -> S3T) + Clone + Send + Sync + 'static,
+    S3T: S3 + Clone + Send + Sync + 'static,
+    SqsT: Sqs + Clone + Send + Sync + 'static,
+    CompletedEventT: Clone + Send + Sync + 'static,
+    EventT: Clone + Send + Sync + 'static,
+    EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
+    EventEncoderT: CompletionEventSerializer<
+            CompletedEvent = CompletedEventT,
+            Output = Vec<u8>,
+            Error = <EventHandlerT as EventHandler>::Error,
         > + Clone
         + Send
         + Sync
         + 'static,
-        EventHandlerT: EventHandler<
-            InputEvent=EventT,
-            OutputEvent=CompletedEventT,
-            Error=crate::error::Error,
+    EventHandlerT: EventHandler<
+            InputEvent = EventT,
+            OutputEvent = CompletedEventT,
+            Error = crate::error::Error,
         > + Clone
         + Send
         + Sync
         + 'static,
-        CacheT: Cache + Clone + Send + Sync + 'static,
-        OnAck: Fn(
+    CacheT: Cache + Clone + Send + Sync + 'static,
+    OnAck: Fn(
             SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>,
             Result<String, String>,
         ) + Send
         + Sync
         + 'static,
-        OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
-        EmissionResult:
-        Future<Output=Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
+    OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
+    EmissionResult:
+        Future<Output = Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
 {
     let queue_url = queue_url.into();
     let dest_bucket = dest_bucket.into();
 
     let consume_policy = ConsumePolicy::new(
-        deadline,                    // Use the Context.deadline from the lambda_runtime
+        deadline,               // Use the Context.deadline from the lambda_runtime
         Duration::from_secs(5), // Stop consuming when there's N seconds left in the runtime
         300,                    // Maximum of 3 empty receives before we stop
     );
@@ -119,10 +129,7 @@ pub async fn local_sqs_service<
                 time_based_key_fn,
                 on_emit,
             ),
-            CompletionPolicy::new(
-                10,                     // Buffer up to 10 messages
-                Duration::from_secs(3), // Buffer for up to 3 seconds
-            ),
+            options.completion_policy,
             on_ack,
             cache,
         ));
@@ -134,7 +141,7 @@ pub async fn local_sqs_service<
         sqs_completion_handler.clone(),
         tx,
     ))
-        .await;
+    .await;
 
     let event_processors: Vec<_> = (0..1)
         .into_iter()
@@ -163,4 +170,84 @@ pub async fn local_sqs_service<
     info!("Delaying");
     tokio::time::delay_for(Duration::from_secs(15)).await;
     Ok(())
+}
+
+pub async fn local_sqs_service<
+    S3T,
+    SInit,
+    SqsT,
+    EventT,
+    CompletedEventT,
+    EventDecoderT,
+    EventEncoderT,
+    EventHandlerT,
+    CacheT,
+    OnAck,
+    EmissionResult,
+    OnEmission,
+>(
+    queue_url: impl Into<String>,
+    dest_bucket: impl Into<String>,
+    deadline: impl IntoDeadline,
+    s3_init: SInit,
+    s3_client: S3T,
+    sqs_client: SqsT,
+    event_decoder: EventDecoderT,
+    event_encoder: EventEncoderT,
+    event_handler: EventHandlerT,
+    cache: CacheT,
+    on_ack: OnAck,
+    on_emit: OnEmission,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    SInit: (Fn(String) -> S3T) + Clone + Send + Sync + 'static,
+    S3T: S3 + Clone + Send + Sync + 'static,
+    SqsT: Sqs + Clone + Send + Sync + 'static,
+    CompletedEventT: Clone + Send + Sync + 'static,
+    EventT: Clone + Send + Sync + 'static,
+    EventDecoderT: PayloadDecoder<EventT> + Clone + Send + Sync + 'static,
+    EventEncoderT: CompletionEventSerializer<
+            CompletedEvent = CompletedEventT,
+            Output = Vec<u8>,
+            Error = <EventHandlerT as EventHandler>::Error,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    EventHandlerT: EventHandler<
+            InputEvent = EventT,
+            OutputEvent = CompletedEventT,
+            Error = crate::error::Error,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    CacheT: Cache + Clone + Send + Sync + 'static,
+    OnAck: Fn(
+            SqsCompletionHandlerActor<CompletedEventT, <EventHandlerT as EventHandler>::Error, SqsT>,
+            Result<String, String>,
+        ) + Send
+        + Sync
+        + 'static,
+    OnEmission: Fn(String, String) -> EmissionResult + Send + Sync + 'static,
+    EmissionResult:
+        Future<Output = Result<(), Box<dyn Error + Send + Sync + 'static>>> + Send + 'static,
+{
+    let options = LocalSqsServiceOptionsBuilder::default().build();
+    local_sqs_service_with_options(
+        queue_url,
+        dest_bucket,
+        deadline,
+        s3_init,
+        s3_client,
+        sqs_client,
+        event_decoder,
+        event_encoder,
+        event_handler,
+        cache,
+        on_ack,
+        on_emit,
+        options,
+    )
+    .await
 }

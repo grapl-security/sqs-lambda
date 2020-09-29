@@ -1,10 +1,8 @@
-use std::fmt::Debug;
 use std::time::Duration;
 
-use darkredis::Connection;
 use darkredis::ConnectionPool;
 use darkredis::Error as RedisError;
-use futures::compat::Future01CompatExt;
+
 use log::warn;
 
 use async_trait::async_trait;
@@ -38,8 +36,7 @@ impl RedisCache {
 }
 
 #[async_trait]
-impl Cache for RedisCache
-{
+impl Cache for RedisCache {
     #[tracing::instrument(skip(self, cacheable))]
     async fn get<CA>(&mut self, cacheable: CA) -> Result<CacheResponse, crate::error::Error>
     where

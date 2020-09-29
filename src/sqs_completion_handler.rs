@@ -1,11 +1,10 @@
 use std::fmt::Debug;
 use std::time::{Duration, Instant};
 
-use futures::compat::Future01CompatExt;
 use log::*;
-use rusoto_sqs::{Message as SqsMessage, DeleteMessageBatchError};
-use rusoto_sqs::{DeleteMessageBatchRequest, DeleteMessageBatchRequestEntry, Sqs, SqsClient};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use rusoto_sqs::Message as SqsMessage;
+use rusoto_sqs::{DeleteMessageBatchRequest, DeleteMessageBatchRequestEntry, Sqs};
+use tokio::sync::mpsc::{channel, Sender};
 
 use crate::cache::Cache;
 use crate::completion_event_serializer::CompletionEventSerializer;
@@ -16,7 +15,6 @@ use async_trait::async_trait;
 
 use crate::completion_handler::CompletionHandler;
 use color_eyre::Help;
-use rusoto_core::RusotoError;
 
 pub struct CompletionPolicy {
     max_messages: u16,
@@ -75,7 +73,7 @@ where
     on_ack: OA,
     self_actor: Option<SqsCompletionHandlerActor<CE, ProcErr, SqsT>>,
     cache: CacheT,
-    _p: std::marker::PhantomData<(ProcErr)>,
+    _p: std::marker::PhantomData<ProcErr>,
 }
 
 impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr>
@@ -146,7 +144,6 @@ where
     errs
 }
 
-
 impl<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr>
     SqsCompletionHandler<SqsT, CPE, CP, CE, Payload, EE, OA, CacheT, ProcErr>
 where
@@ -166,12 +163,8 @@ where
     CacheT: Cache + Send + Sync + Clone + 'static,
     ProcErr: Debug + Send + Sync + 'static,
 {
-
     #[tracing::instrument(skip(self))]
-    pub async fn ack_message(
-        &mut self,
-        sqs_message: SqsMessage,
-    ) {
+    pub async fn ack_message(&mut self, sqs_message: SqsMessage) {
         self.completed_messages.push(sqs_message);
         if self
             .completion_policy
@@ -181,7 +174,6 @@ where
             self.completion_policy.set_last_flush();
         }
     }
-
 
     #[tracing::instrument(skip(self, completed))]
     pub async fn mark_complete(
@@ -269,15 +261,17 @@ where
                 .collect();
 
             match retry(10, || async {
-
-                let dmb = self.sqs_client
+                let dmb = self
+                    .sqs_client
                     .delete_message_batch(DeleteMessageBatchRequest {
                         entries: entries.clone(),
                         queue_url: self.queue_url.clone(),
                     });
 
                 tokio::time::timeout(Duration::from_millis(250), dmb).await
-            }).await {
+            })
+            .await
+            {
                 Ok(dmb) => acks.push((dmb, msg_ids)),
                 Err(e) => warn!("Failed to delete message, timed out: {:?}", e),
             };
@@ -334,7 +328,7 @@ where
         notify: Option<tokio::sync::oneshot::Sender<()>>,
     },
     _p {
-        _p: std::marker::PhantomData<(SqsT)>,
+        _p: std::marker::PhantomData<SqsT>,
     },
 }
 
@@ -452,7 +446,7 @@ where
 
         let actor_uuid = uuid::Uuid::new_v4();
         let actor_name = format!("{} {} {}", stringify!(#actor_ty), actor_uuid, 0,);
-        let mut self_actor = Self {
+        let self_actor = Self {
             sender,
             inner_rc: inner_rc.clone(),
             queue_len: queue_len.clone(),
@@ -480,7 +474,7 @@ where
         tokio::task::spawn(async move {
             if let Err(e) = sender.send(msg).await {
                 panic!(
-                        "Receiver has failed with {}, propagating error. SqsCompletionHandler",
+                    "Receiver has failed with {}, propagating error. SqsCompletionHandler",
                     e
                 )
             }
@@ -488,7 +482,7 @@ where
     }
 
     pub async fn ack_message(&self, msg: SqsMessage) {
-        let msg = SqsCompletionHandlerMessage::ack_message { msg  };
+        let msg = SqsCompletionHandlerMessage::ack_message { msg };
         let mut sender = self.sender.clone();
 
         let queue_len = self.queue_len.clone();
@@ -498,8 +492,8 @@ where
             if let Err(e) = sender.send(msg).await {
                 panic!(
                     concat!(
-                    "Receiver has failed with {}, propagating error. ",
-                    "SqsCompletionHandler"
+                        "Receiver has failed with {}, propagating error. ",
+                        "SqsCompletionHandler"
                     ),
                     e
                 )
@@ -517,14 +511,14 @@ where
         tokio::task::spawn(async move {
             if let Err(e) = sender.send(msg).await {
                 panic!(
-                        "Receiver has failed with {}, propagating error. SqsCompletionHandler",
+                    "Receiver has failed with {}, propagating error. SqsCompletionHandler",
                     e
                 )
             }
         });
     }
 
-    async fn _p(&self, _p: std::marker::PhantomData<(SqsT)>) {
+    async fn _p(&self, _p: std::marker::PhantomData<SqsT>) {
         panic!("Invalid to call p");
         let msg = SqsCompletionHandlerMessage::_p { _p };
         if let Err(_e) = self.sender.clone().send(msg).await {

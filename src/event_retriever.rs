@@ -3,10 +3,10 @@ use std::io::Read;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use tracing::info;
 use rusoto_s3::{GetObjectRequest, S3};
 use rusoto_sqs::Message as SqsMessage;
 use tokio::prelude::*;
+use tracing::info;
 
 use async_trait::async_trait;
 
@@ -78,7 +78,7 @@ where
 
         if let Some(Some(event_str)) = event.get("Event").map(serde_json::Value::as_str) {
             if event_str == "s3:TestEvent" {
-                return Ok(None)
+                return Ok(None);
             }
         }
         let record = &event["Records"][0]["s3"];

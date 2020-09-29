@@ -4,7 +4,6 @@ extern crate rusoto_sqs;
 extern crate sqs_lambda;
 extern crate tokio;
 
-use log::Level;
 use std::error::Error;
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -34,15 +33,13 @@ use tracing_subscriber::EnvFilter;
 struct MyService<C>
 where
     C: Cache + Clone + Send + Sync + 'static,
-    
 {
     cache: C,
 }
 
 impl<C> Clone for MyService<C>
-    where
-        C: Cache + Clone + Send + Sync + 'static,
-        
+where
+    C: Cache + Clone + Send + Sync + 'static,
 {
     fn clone(&self) -> MyService<C> {
         Self {
@@ -54,12 +51,9 @@ impl<C> Clone for MyService<C>
 impl<C> MyService<C>
 where
     C: Cache + Clone + Send + Sync + 'static,
-    
 {
     pub fn new(cache: C) -> Self {
-        Self {
-            cache,
-        }
+        Self { cache }
     }
 }
 
@@ -67,7 +61,6 @@ where
 impl<C> EventHandler for MyService<C>
 where
     C: Cache + Clone + Send + Sync + 'static,
-    
 {
     type InputEvent = Vec<u8>;
     type OutputEvent = Subgraph;
@@ -78,8 +71,7 @@ where
         _input: Self::InputEvent,
     ) -> OutputEvent<Self::OutputEvent, Self::Error> {
         // do some work
-        let mut completed =
-            OutputEvent::new(Completion::Total(Subgraph {}));
+        let completed = OutputEvent::new(Completion::Total(Subgraph {}));
 
         // for input in _input.keys() {
         //     completed.add_identity(input);
@@ -255,7 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             dbg!(event_result);
         },
         move |bucket, key| async move {
-            let output_event = S3Event {
+            let _output_event = S3Event {
                 records: vec![S3EventRecord {
                     event_version: None,
                     event_source: None,
@@ -287,7 +279,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }],
             };
 
-            let sqs_client = init_sqs_client();
+            let _sqs_client = init_sqs_client();
 
             // publish to SQS
             // sqs_client.send_message(

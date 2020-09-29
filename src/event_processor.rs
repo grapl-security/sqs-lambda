@@ -1,5 +1,5 @@
-use tracing::{info, warn};
 use tokio::sync::mpsc::{channel, Sender};
+use tracing::{info, warn};
 
 use crate::completion_handler::CompletionHandler;
 use crate::consumer::Consumer;
@@ -10,8 +10,8 @@ use std::fmt::Debug;
 use aktors::actor::Actor;
 use async_trait::async_trait;
 
-use tracing::instrument;
 use serde::export::Formatter;
+use tracing::instrument;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ProcessorState {
@@ -45,15 +45,16 @@ where
     self_actor: Option<EventProcessorActor<M>>,
 }
 
-impl<M, C, EH, Input, Output, ER, CH>  std::fmt::Debug for EventProcessor<M, C, EH, Input, Output, ER, CH>
-    where
-        M: Send + Clone + Sync + 'static,
-        C: Consumer<M> + Clone + Send + Sync + 'static,
-        EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
-        Input: Send + Clone + 'static,
-        Output: Send + Sync + Clone + 'static,
-        ER: PayloadRetriever<Input, Message = M> + Send + Sync + Clone + 'static,
-        CH: CompletionHandler<
+impl<M, C, EH, Input, Output, ER, CH> std::fmt::Debug
+    for EventProcessor<M, C, EH, Input, Output, ER, CH>
+where
+    M: Send + Clone + Sync + 'static,
+    C: Consumer<M> + Clone + Send + Sync + 'static,
+    EH: EventHandler<InputEvent = Input, OutputEvent = Output> + Send + Sync + Clone + 'static,
+    Input: Send + Clone + 'static,
+    Output: Send + Sync + Clone + 'static,
+    ER: PayloadRetriever<Input, Message = M> + Send + Sync + Clone + 'static,
+    CH: CompletionHandler<
             Message = M,
             CompletedEvent = OutputEvent<Output, <EH as EventHandler>::Error>,
         > + Send
@@ -62,14 +63,13 @@ impl<M, C, EH, Input, Output, ER, CH>  std::fmt::Debug for EventProcessor<M, C, 
         + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EventProcessor")
-            .finish()
+        f.debug_struct("EventProcessor").finish()
     }
 }
 
-impl<M>  std::fmt::Debug for EventProcessorActor<M>
-    where
-        M: Send + Clone + Sync + 'static,
+impl<M> std::fmt::Debug for EventProcessorActor<M>
+where
+    M: Send + Clone + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventProcessorActor")
@@ -110,7 +110,6 @@ where
         }
     }
 }
-
 
 impl<M, C, EH, Input, Output, ER, CH> EventProcessor<M, C, EH, Input, Output, ER, CH>
 where
@@ -165,12 +164,9 @@ where
         } else {
             if unsupported {
                 // ack this event as it's unsupported and does not require processing
-                self.completion_handler
-                    .ack_message(event)
-                    .await;
+                self.completion_handler.ack_message(event).await;
             }
         }
-
 
         info!("self.processor_state {:?}", self.state);
         if let ProcessorState::Started = self.state {

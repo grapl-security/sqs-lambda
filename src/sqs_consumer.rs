@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use futures::compat::Future01CompatExt;
 use lambda_runtime::Context;
-use log::{debug, error, warn};
+use log::{debug, error};
 use rusoto_sqs::Message as SqsMessage;
-use rusoto_sqs::{ReceiveMessageError, ReceiveMessageRequest, Sqs};
+use rusoto_sqs::{ReceiveMessageRequest, Sqs};
 use tokio::sync::mpsc::{channel, Sender};
 
 use tracing::instrument;
@@ -14,9 +13,9 @@ use async_trait::async_trait;
 
 use crate::completion_handler::CompletionHandler;
 use crate::event_processor::EventProcessorActor;
-use aktors::actor::Actor;
-use std::marker::PhantomData;
+
 use chrono::Utc;
+use std::marker::PhantomData;
 
 pub struct ConsumePolicy {
     deadline: i64,
@@ -30,11 +29,15 @@ pub trait IntoDeadline {
 }
 
 impl IntoDeadline for Context {
-    fn into_deadline(self) -> i64 { self.deadline }
+    fn into_deadline(self) -> i64 {
+        self.deadline
+    }
 }
 
 impl IntoDeadline for i64 {
-    fn into_deadline(self) -> i64 { self }
+    fn into_deadline(self) -> i64 {
+        self
+    }
 }
 
 impl ConsumePolicy {
@@ -109,10 +112,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
     SqsConsumer<S, CH>
 {
     #[instrument(skip(self))]
-    pub async fn batch_get_events(
-        &self,
-        wait_time_seconds: i64,
-    ) -> eyre::Result<Vec<SqsMessage>> {
+    pub async fn batch_get_events(&self, wait_time_seconds: i64) -> eyre::Result<Vec<SqsMessage>> {
         debug!("Calling receive_message");
         let recv = self.sqs_client.receive_message(ReceiveMessageRequest {
             max_number_of_messages: Some(10),
@@ -151,8 +151,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
                         .await;
 
                     // Register the empty receive on error
-                    self.consume_policy
-                        .register_received(false);
+                    self.consume_policy.register_received(false);
                     return;
                 }
             };
