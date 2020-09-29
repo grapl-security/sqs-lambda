@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error
-{
+pub enum Error {
     #[error("CacheError: {0}")]
     CacheError(String),
     #[error("ProcessingError: {0}")]

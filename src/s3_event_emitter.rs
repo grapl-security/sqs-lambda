@@ -1,12 +1,8 @@
 use std::error::Error;
-use std::time::Duration;
 
 use crate::event_emitter::EventEmitter;
 use async_trait::async_trait;
-use futures::compat::Future01CompatExt;
-use futures::future::FutureExt;
-use futures::TryStreamExt;
-use log::*;
+
 use rusoto_s3::{PutObjectRequest, S3};
 use std::future::Future;
 

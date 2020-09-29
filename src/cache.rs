@@ -2,7 +2,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use async_trait::async_trait;
-use std::fmt::Debug;
 
 pub trait Cacheable {
     fn identity(&self) -> Vec<u8>;
@@ -27,8 +26,7 @@ pub enum CacheResponse {
 }
 
 #[async_trait]
-pub trait Cache: Clone
-{
+pub trait Cache: Clone {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
         cacheable: CA,
@@ -37,8 +35,7 @@ pub trait Cache: Clone
 }
 
 #[async_trait]
-pub trait ReadableCache
-{
+pub trait ReadableCache {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
         cacheable: CA,
@@ -62,8 +59,7 @@ where
 pub struct NopCache {}
 
 #[async_trait]
-impl Cache for NopCache
-{
+impl Cache for NopCache {
     async fn get<CA: Cacheable + Send + Sync + 'static>(
         &mut self,
         _cacheable: CA,

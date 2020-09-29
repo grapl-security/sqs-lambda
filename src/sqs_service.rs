@@ -1,26 +1,22 @@
-use std::fmt::Debug;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::info;
 use rusoto_s3::S3;
 use rusoto_sqs::{SendMessageRequest, Sqs, SqsClient};
 
-use crate::cache::{Cache, NopCache};
+use crate::cache::Cache;
 use crate::completion_event_serializer::CompletionEventSerializer;
 use crate::event_decoder::PayloadDecoder;
-use crate::event_handler;
-use crate::event_handler::{EventHandler, OutputEvent};
+
+use crate::event_handler::EventHandler;
 use crate::event_processor::{EventProcessor, EventProcessorActor};
 use crate::event_retriever::S3PayloadRetriever;
 use crate::s3_event_emitter::S3EventEmitter;
 use crate::sqs_completion_handler::{
     CompletionPolicy, SqsCompletionHandler, SqsCompletionHandlerActor,
 };
-use crate::sqs_consumer::{ConsumePolicy, SqsConsumer, SqsConsumerActor, IntoDeadline};
-use aws_lambda_events::event::s3::{
-    S3Bucket, S3Entity, S3Event, S3EventRecord, S3Object, S3RequestParameters, S3UserIdentity,
-};
-use rusoto_core::Region;
+use crate::sqs_consumer::{ConsumePolicy, IntoDeadline, SqsConsumer, SqsConsumerActor};
+
 use std::error::Error;
 use std::future::Future;
 
@@ -102,14 +98,14 @@ where
     let dest_bucket = dest_bucket.into();
 
     let consume_policy = ConsumePolicy::new(
-        deadline,                    // Use the Context.deadline from the lambda_runtime
+        deadline,                // Use the Context.deadline from the lambda_runtime
         Duration::from_secs(10), // Stop consuming when there's N seconds left in the runtime
-        3,                      // Maximum of 3 empty receives before we stop
+        3,                       // Maximum of 3 empty receives before we stop
     );
 
     let (tx, shutdown_notify) = tokio::sync::oneshot::channel();
 
-    let (sqs_completion_handler, sqs_completion_handle) =
+    let (sqs_completion_handler, _sqs_completion_handle) =
         SqsCompletionHandlerActor::new(SqsCompletionHandler::new(
             sqs_client.clone(),
             queue_url.clone(),
