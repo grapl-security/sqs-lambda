@@ -9,9 +9,9 @@ license = "MIT"
 
 [dependencies]
 
-rusoto_core = {version = "0.43.0", default_features = false, features=["rustls"]}
-rusoto_s3 = {version = "0.43.0", default_features = false, features=["rustls"]}
-rusoto_sqs = {version = "0.43.0", default_features = false, features=["rustls"]}
+rusoto_core = {version = "0.44.0", default_features = false, features=["rustls"]}
+rusoto_s3 = {version = "0.44.0", default_features = false, features=["rustls"]}
+rusoto_sqs = {version = "0.44.0", default_features = false, features=["rustls"]}
 
 futures = {version="0.3", features=["compat"]}
 
