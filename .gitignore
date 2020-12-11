@@ -12,3 +12,4 @@ Cargo.lock
 <<<<<<< HEAD
 input-dir/
 *.iml
+.swp

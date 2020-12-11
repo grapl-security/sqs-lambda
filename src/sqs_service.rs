@@ -48,7 +48,8 @@ pub async fn sqs_service<
     queue_url: impl Into<String>,
     initial_messages: impl IntoIterator<Item = rusoto_sqs::Message>,
     dest_bucket: impl Into<String>,
-    deadline: impl IntoDeadline,
+    consume_policy: ConsumePolicy,
+    completion_policy: CompletionPolicy,
     s3_init: SInit,
     s3_client: S3T,
     sqs_client: SqsT,
@@ -97,12 +98,6 @@ where
     let queue_url = queue_url.into();
     let dest_bucket = dest_bucket.into();
 
-    let consume_policy = ConsumePolicy::new(
-        deadline,                // Use the Context.deadline from the lambda_runtime
-        Duration::from_secs(10), // Stop consuming when there's N seconds left in the runtime
-        3,                       // Maximum of 3 empty receives before we stop
-    );
-
     let (tx, shutdown_notify) = tokio::sync::oneshot::channel();
 
     let (sqs_completion_handler, _sqs_completion_handle) =
@@ -116,10 +111,7 @@ where
                 time_based_key_fn,
                 on_emit,
             ),
-            CompletionPolicy::new(
-                1000,                    // Buffer up to 1000 messages
-                Duration::from_secs(30), // Buffer for up to 30 seconds
-            ),
+            completion_policy,
             on_ack,
             cache,
         ));

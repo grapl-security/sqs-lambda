@@ -86,8 +86,6 @@ where
         let bucket = record["bucket"]["name"].as_str().expect("bucket name");
         let key = record["object"]["key"].as_str().expect("object key");
 
-        println!("{}/{}", bucket, key);
-
         let region = &event["Records"][0]["awsRegion"].as_str().expect("region");
         let s3 = self.get_client(region.to_string());
         let s3_data = s3.get_object(GetObjectRequest {
