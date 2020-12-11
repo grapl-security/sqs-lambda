@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use crate::completion_handler::CompletionHandler;
 use color_eyre::Help;
 
+#[derive(Debug, Clone)]
 pub struct CompletionPolicy {
     max_messages: u16,
     max_time_between_flushes: Duration,

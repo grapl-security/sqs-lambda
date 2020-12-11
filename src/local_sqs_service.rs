@@ -110,12 +110,6 @@ where
     let queue_url = queue_url.into();
     let dest_bucket = dest_bucket.into();
 
-    let consume_policy = ConsumePolicy::new(
-        deadline,               // Use the Context.deadline from the lambda_runtime
-        Duration::from_secs(5), // Stop consuming when there's N seconds left in the runtime
-        300,                    // Maximum of 3 empty receives before we stop
-    );
-
     let (tx, shutdown_notify) = tokio::sync::oneshot::channel();
 
     let (sqs_completion_handler, sqs_completion_handle) =
@@ -137,7 +131,7 @@ where
     let (sqs_consumer, sqs_consumer_handle) = SqsConsumerActor::new(SqsConsumer::new(
         sqs_client.clone(),
         queue_url.clone(),
-        consume_policy,
+        options.consume_policy,
         sqs_completion_handler.clone(),
         tx,
     ))

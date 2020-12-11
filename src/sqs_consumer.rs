@@ -17,6 +17,34 @@ use crate::event_processor::EventProcessorActor;
 use chrono::Utc;
 use std::marker::PhantomData;
 
+#[derive(Debug, Clone, Default)]
+pub struct ConsumePolicyBuilder {
+    deadline: Option<i64>,
+    stop_at: Option<Duration>,
+    max_empty_receives: Option<u16>,
+}
+
+impl ConsumePolicyBuilder {
+    pub fn with_max_empty_receives(mut self, arg: u16) -> Self {
+        self.max_empty_receives = Some(arg);
+        self
+    }
+
+    pub fn with_stop_at(mut self, arg: Duration) -> Self {
+        self.stop_at = Some(arg);
+        self
+    }
+
+    pub fn build(self, deadline: impl IntoDeadline) -> ConsumePolicy {
+        ConsumePolicy::new(
+            deadline,
+            self.stop_at.unwrap_or_else(|| Duration::from_secs(10)),
+            self.max_empty_receives.unwrap_or_else(|| 1),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ConsumePolicy {
     deadline: i64,
     stop_at: Duration,
@@ -114,10 +142,12 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
     #[instrument(skip(self))]
     pub async fn batch_get_events(&self, wait_time_seconds: i64) -> eyre::Result<Vec<SqsMessage>> {
         debug!("Calling receive_message");
+        let visibility_timeout = Duration::from_millis(self.consume_policy.deadline as u64).as_secs() + 1;
         let recv = self.sqs_client.receive_message(ReceiveMessageRequest {
             max_number_of_messages: Some(10),
             queue_url: self.queue_url.clone(),
             wait_time_seconds: Some(wait_time_seconds),
+            visibility_timeout: Some(visibility_timeout as i64),
             ..Default::default()
         });
 
@@ -192,7 +222,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
             event_processor.process_event(next_event).await;
             debug!("Sent next event to processor");
         } else {
-            tokio::time::delay_for(Duration::from_millis(500)).await;
+            tokio::time::delay_for(Duration::from_millis(50)).await;
             debug!("No events to send to processor");
             self.self_actor
                 .clone()
