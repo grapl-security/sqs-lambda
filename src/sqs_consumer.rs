@@ -142,7 +142,7 @@ impl<S: Sqs + Send + Sync + 'static, CH: CompletionHandler + Clone + Send + Sync
     #[instrument(skip(self))]
     pub async fn batch_get_events(&self, wait_time_seconds: i64) -> eyre::Result<Vec<SqsMessage>> {
         debug!("Calling receive_message");
-        let visibility_timeout = Duration::from_millis(self.get_time_remaining_millis() as u64).as_secs() + 1;
+        let visibility_timeout = Duration::from_millis(self.consume_policy.get_time_remaining_millis() as u64).as_secs() + 1;
         let recv = self.sqs_client.receive_message(ReceiveMessageRequest {
             max_number_of_messages: Some(10),
             queue_url: self.queue_url.clone(),
