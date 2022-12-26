@@ -1,6 +1,13 @@
 # sqs-lambda
 A Rust crate for writing AWS Lambdas that are triggered by SQS
 
+## NOTICE
+Grapl has ceased operations as a company. As such, this code is no
+longer being actively developed, but will remain available in an
+archived state.
+
+## About
+
 This library allows you to turn single-event SQS-triggered lambdas into something that's
 more like a streaming processor. This is useful for high throughput worklodas.
 
